@@ -1,11 +1,11 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Plus, Filter, Search, Power, Wrench, CheckCircle, Upload, Paperclip, QrCode, ChevronDown, X } from 'lucide-react';
 import { Card, CardHeader, CardBody, Button, Badge, Table, Modal } from '../components';
 import useStore from '../store/useStore';
 
 const Assets = () => {
-  const { assets, locations, updateAssetStatus, addAsset } = useStore();
+  const { assets, locations, assetHealthEvents, updateAssetStatus, addAsset } = useStore();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState(null);
   const pictureInputRef = useRef(null);
@@ -31,23 +31,91 @@ const Assets = () => {
     vendor: '',
     parts: '',
     parentAssetId: '',
-    category: '',
   });
   const [filters, setFilters] = useState({
+    criticality: '',
     status: '',
-    category: '',
-    location: ''
+    downtimeReason: '',
+    downtimeType: '',
+    assetType: '',
+    assetId: '',
   });
   const [searchTerm, setSearchTerm] = useState('');
 
-  const filteredAssets = assets.filter(asset => {
-    const matchesSearch = asset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         asset.description?.toLowerCase().includes(searchTerm.toLowerCase());
+  const latestDowntimeByAssetId = useMemo(() => {
+    const byAsset = new Map();
+    const list = Array.isArray(assetHealthEvents) ? assetHealthEvents : [];
+    const sorted = [...list]
+      .filter((e) => e && e.assetId && e.timestamp)
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    for (const e of sorted) {
+      if (e.status !== 'down') continue;
+      byAsset.set(e.assetId, {
+        downtimeType: e.downtimeType || '',
+        downtimeReason: e.downtimeReason || '',
+        timestamp: e.timestamp,
+      });
+    }
+    return byAsset;
+  }, [assetHealthEvents]);
+
+  const criticalityOptions = useMemo(() => {
+    const set = new Set();
+    for (const a of (assets || [])) {
+      if (a.criticality) set.add(a.criticality);
+    }
+    return [...set].sort();
+  }, [assets]);
+
+  const assetTypeOptions = useMemo(() => {
+    const set = new Set();
+    for (const a of (assets || [])) {
+      if (a.assetType) set.add(a.assetType);
+    }
+    return [...set].sort();
+  }, [assets]);
+
+  const downtimeTypeOptions = useMemo(() => {
+    const set = new Set();
+    for (const e of (assetHealthEvents || [])) {
+      if (e?.downtimeType) set.add(e.downtimeType);
+    }
+    return [...set].sort();
+  }, [assetHealthEvents]);
+
+  const downtimeReasonOptions = useMemo(() => {
+    const set = new Set();
+    for (const e of (assetHealthEvents || [])) {
+      if (e?.downtimeReason) set.add(e.downtimeReason);
+    }
+    return [...set].sort();
+  }, [assetHealthEvents]);
+
+  const filteredAssets = (assets || []).filter((asset) => {
+    const q = (searchTerm || '').trim().toLowerCase();
+    const matchesSearch = !q
+      || (asset.name || '').toLowerCase().includes(q)
+      || (asset.description || '').toLowerCase().includes(q);
+
+    const matchesCriticality = !filters.criticality || asset.criticality === filters.criticality;
     const matchesStatus = !filters.status || asset.status === filters.status;
-    const matchesCategory = !filters.category || asset.category === filters.category;
-    const matchesLocation = !filters.location || asset.locationId === filters.location;
-    
-    return matchesSearch && matchesStatus && matchesCategory && matchesLocation;
+    const matchesAssetType = !filters.assetType || asset.assetType === filters.assetType;
+    const matchesAsset = !filters.assetId || asset.id === filters.assetId;
+
+    const lastDown = latestDowntimeByAssetId.get(asset.id) || { downtimeType: '', downtimeReason: '' };
+    const matchesDowntimeType = !filters.downtimeType || lastDown.downtimeType === filters.downtimeType;
+    const matchesDowntimeReason = !filters.downtimeReason || lastDown.downtimeReason === filters.downtimeReason;
+
+    return (
+      matchesSearch
+      && matchesCriticality
+      && matchesStatus
+      && matchesDowntimeType
+      && matchesDowntimeReason
+      && matchesAssetType
+      && matchesAsset
+    );
   });
 
   const getLocationName = (locationId) => {
@@ -114,8 +182,6 @@ const Assets = () => {
     updateAssetStatus(assetId, newStatus);
   };
 
-  const categories = [...new Set(assets.map(asset => asset.category))];
-
   const generateBarcode = () => `BC-${Date.now()}-${Math.random().toString(16).slice(2, 8).toUpperCase()}`;
 
   const resetCreateForm = () => {
@@ -137,7 +203,6 @@ const Assets = () => {
       vendor: '',
       parts: '',
       parentAssetId: '',
-      category: '',
     });
   };
 
@@ -215,7 +280,6 @@ const Assets = () => {
     addAsset({
       name,
       description: createForm.description.trim() || undefined,
-      category: createForm.category || undefined,
       locationId: createForm.locationId || undefined,
       criticality: createForm.criticality || undefined,
       year: createForm.year ? parseInt(createForm.year, 10) : undefined,
@@ -319,53 +383,129 @@ const Assets = () => {
       {/* Filters and Search */}
       <Card>
         <CardBody>
-          <div className="flex flex-col lg:flex-row gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search assets..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
-                />
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
+                <Filter className="h-4 w-4 text-gray-400" />
+                Filters
               </div>
+
+              <div className="relative">
+                <select
+                  value={filters.criticality}
+                  onChange={(e) => setFilters((p) => ({ ...p, criticality: e.target.value }))}
+                  className="appearance-none rounded-md border border-gray-200 bg-white px-3 py-1.5 pr-8 text-sm text-gray-700"
+                >
+                  <option value="">Criticality</option>
+                  {criticalityOptions.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+
+              <div className="relative">
+                <select
+                  value={filters.status}
+                  onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value }))}
+                  className="appearance-none rounded-md border border-gray-200 bg-white px-3 py-1.5 pr-8 text-sm text-gray-700"
+                >
+                  <option value="">Status</option>
+                  <option value="running">Running</option>
+                  <option value="down">Down</option>
+                  <option value="maintenance">Under Maintenance</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+
+              <div className="relative">
+                <select
+                  value={filters.downtimeReason}
+                  onChange={(e) => setFilters((p) => ({ ...p, downtimeReason: e.target.value }))}
+                  className="appearance-none rounded-md border border-gray-200 bg-white px-3 py-1.5 pr-8 text-sm text-gray-700"
+                >
+                  <option value="">Downtime Reason</option>
+                  {downtimeReasonOptions.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+
+              <div className="relative">
+                <select
+                  value={filters.downtimeType}
+                  onChange={(e) => setFilters((p) => ({ ...p, downtimeType: e.target.value }))}
+                  className="appearance-none rounded-md border border-gray-200 bg-white px-3 py-1.5 pr-8 text-sm text-gray-700"
+                >
+                  <option value="">Downtime Type</option>
+                  {downtimeTypeOptions.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+
+              <div className="relative">
+                <select
+                  value={filters.assetType}
+                  onChange={(e) => setFilters((p) => ({ ...p, assetType: e.target.value }))}
+                  className="appearance-none rounded-md border border-gray-200 bg-white px-3 py-1.5 pr-8 text-sm text-gray-700"
+                >
+                  <option value="">Asset Types</option>
+                  {assetTypeOptions.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+
+              <div className="relative">
+                <select
+                  value={filters.assetId}
+                  onChange={(e) => setFilters((p) => ({ ...p, assetId: e.target.value }))}
+                  className="appearance-none rounded-md border border-gray-200 bg-white px-3 py-1.5 pr-8 text-sm text-gray-700"
+                >
+                  <option value="">Asset</option>
+                  {(assets || []).map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <Plus className="h-4 w-4" />
+                Add Filter
+              </button>
             </div>
-            
-            <div className="flex gap-2">
-              <select
-                value={filters.status}
-                onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-                className="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
-              >
-                <option value="">All Status</option>
-                <option value="running">Running</option>
-                <option value="down">Down</option>
-                <option value="maintenance">Under Maintenance</option>
-              </select>
 
-              <select
-                value={filters.category}
-                onChange={(e) => setFilters({ ...filters, category: e.target.value })}
-                className="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
-              >
-                <option value="">All Categories</option>
-                {categories.map(category => (
-                  <option key={category} value={category}>{category}</option>
-                ))}
-              </select>
+            <div className="flex flex-col lg:flex-row gap-3">
+              <div className="flex-1">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search assets..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                  />
+                </div>
+              </div>
 
-              <select
-                value={filters.location}
-                onChange={(e) => setFilters({ ...filters, location: e.target.value })}
-                className="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
-              >
-                <option value="">All Locations</option>
-                {locations.map(location => (
-                  <option key={location.id} value={location.id}>{location.name}</option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFilters({ criticality: '', status: '', downtimeReason: '', downtimeType: '', assetType: '', assetId: '' })}
+                  className="inline-flex items-center rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Clear
+                </button>
+              </div>
             </div>
           </div>
         </CardBody>
@@ -738,22 +878,6 @@ const Assets = () => {
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-              <select
-                value={createForm.category}
-                onChange={(e) => setCreateForm((p) => ({ ...p, category: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
-              >
-                <option value="">Select Category</option>
-                {categories.map((category) => (
-                  <option key={category} value={category}>{category}</option>
-                ))}
-              </select>
             </div>
           </div>
 
