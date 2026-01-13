@@ -17,7 +17,11 @@ import {
   BarChart3, 
   Settings,
   Menu,
-  X
+  X,
+  Gauge,
+  Zap,
+  Users,
+  Truck
 } from 'lucide-react';
 import useStore from '../../store/useStore';
 
@@ -39,9 +43,13 @@ const navigation = [
       { name: 'Procedures', href: '/library/procedures' },
     ],
   },
+  { name: 'Meters', href: '/meters', icon: Gauge },
+  { name: 'Automations', href: '/automations', icon: Zap },
   { name: 'Preventive Maintenance', href: '/pm', icon: Calendar },
   { name: 'Inventory', href: '/inventory', icon: Archive },
   { name: 'Locations', href: '/locations', icon: MapPin },
+  { name: 'Teams / Users', href: '/teams-users', icon: Users },
+  { name: 'Vendors', href: '/vendors', icon: Truck },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 

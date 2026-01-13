@@ -16,6 +16,14 @@ import PartsInventory from './pages/PartsInventory.jsx';
 import AssetPackages from './pages/AssetPackages.jsx';
 import WorkOrderTemplates from './pages/WorkOrderTemplates.jsx';
 import Procedures from './pages/Procedures.jsx';
+import Meters from './pages/Meters.jsx';
+import Automations from './pages/Automations.jsx';
+import AutomationCreate from './pages/AutomationCreate.jsx';
+import LocationCreate from './pages/LocationCreate.jsx';
+import TeamsUsers from './pages/TeamsUsers.jsx';
+import InviteUsers from './pages/InviteUsers.jsx';
+import Vendors from './pages/Vendors.jsx';
+import VendorCreate from './pages/VendorCreate.jsx';
 
 function App() {
   return (
@@ -34,9 +42,17 @@ function App() {
           <Route path="/library/asset-packages" element={<AssetPackages />} />
           <Route path="/library/work-orders" element={<WorkOrderTemplates />} />
           <Route path="/library/procedures" element={<Procedures />} />
+          <Route path="/meters" element={<Meters />} />
+          <Route path="/automations" element={<Automations />} />
+          <Route path="/automations/create" element={<AutomationCreate />} />
           <Route path="/pm" element={<PreventiveMaintenance />} />
           <Route path="/inventory" element={<Inventory />} />
           <Route path="/locations" element={<Locations />} />
+          <Route path="/locations/create" element={<LocationCreate />} />
+          <Route path="/teams-users" element={<TeamsUsers />} />
+          <Route path="/teams-users/invite" element={<InviteUsers />} />
+          <Route path="/vendors" element={<Vendors />} />
+          <Route path="/vendors/create" element={<VendorCreate />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Layout>

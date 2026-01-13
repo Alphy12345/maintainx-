@@ -1,10 +1,10 @@
 import React, { useRef, useState } from 'react';
-import { Plus, Search, ChevronDown, SlidersHorizontal, Upload, X } from 'lucide-react';
+import { Plus, Search, ChevronDown, SlidersHorizontal, Upload, X, ListChecks } from 'lucide-react';
 import { Button, Badge, Modal } from '../components';
 import useStore from '../store/useStore';
 
 const WorkOrders = () => {
-  const { workOrders, assets, locations, users, currentUser, addWorkOrder, addUser, addLocation, addAsset, updateWorkOrder } = useStore();
+  const { workOrders, assets, locations, users, categories, inventory, currentUser, addWorkOrder, addUser, addLocation, addAsset, updateWorkOrder } = useStore();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState(null);
   const [activeTab, setActiveTab] = useState('todo');
@@ -23,6 +23,7 @@ const WorkOrders = () => {
     description: '',
     locationName: '',
     assetName: '',
+    procedure: '',
     assignee: '',
     estimatedHours: '',
     estimatedMinutes: '',
@@ -31,6 +32,9 @@ const WorkOrders = () => {
     recurrence: 'does_not_repeat',
     workType: 'reactive',
     priority: 'low',
+    parts: '',
+    categoryId: '',
+    vendorId: '',
     attachments: [],
   });
 
@@ -118,6 +122,7 @@ const WorkOrders = () => {
       description: '',
       locationName: '',
       assetName: '',
+      procedure: '',
       assignee: '',
       estimatedHours: '',
       estimatedMinutes: '',
@@ -126,6 +131,9 @@ const WorkOrders = () => {
       recurrence: 'does_not_repeat',
       workType: 'reactive',
       priority: 'low',
+      parts: '',
+      categoryId: '',
+      vendorId: '',
       attachments: [],
     });
   };
@@ -680,6 +688,32 @@ const WorkOrders = () => {
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
                 placeholder="Start typing..."
               />
+              <button
+                type="button"
+                className="mt-2 inline-flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700"
+              >
+                <span className="text-lg leading-none">+</span>
+                Add multiple assets
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Procedure</label>
+            <div className="border border-gray-200 rounded-md p-4 bg-white text-center">
+              <div className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <ListChecks className="h-4 w-4 text-gray-500" />
+                Create or attach new Form, Procedure or Checklist
+              </div>
+              <div className="mt-3">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 px-4 py-2 border border-primary-500 text-primary-700 rounded-md text-sm hover:bg-primary-50"
+                >
+                  <span className="text-lg leading-none">+</span>
+                  Add Procedure
+                </button>
+              </div>
             </div>
           </div>
 
@@ -793,6 +827,70 @@ const WorkOrders = () => {
                   {p.label}
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Files</label>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex items-center gap-2 px-4 py-2 border border-primary-500 text-primary-700 rounded-md text-sm hover:bg-primary-50"
+              >
+                <Upload className="h-4 w-4" />
+                Attach files
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Parts</label>
+              <div className="relative">
+                <select
+                  value={createForm.parts}
+                  onChange={(e) => setCreateForm((p) => ({ ...p, parts: e.target.value }))}
+                  className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                >
+                  <option value="">Start typing...</option>
+                  {(inventory || []).map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Categories</label>
+              <div className="relative">
+                <select
+                  value={createForm.categoryId}
+                  onChange={(e) => setCreateForm((p) => ({ ...p, categoryId: e.target.value }))}
+                  className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                >
+                  <option value="">Start typing...</option>
+                  {(categories || []).map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Vendors</label>
+              <div className="relative">
+                <select
+                  value={createForm.vendorId}
+                  onChange={(e) => setCreateForm((p) => ({ ...p, vendorId: e.target.value }))}
+                  className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                >
+                  <option value="">Start typing...</option>
+                  <option value="vendor-1">Vendor 1</option>
+                  <option value="vendor-2">Vendor 2</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
             </div>
           </div>
 
