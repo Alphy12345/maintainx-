@@ -1,7 +1,6 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout/Layout';
-import Dashboard from './pages/Dashboard';
 import WorkOrders from './pages/WorkOrders';
 import Assets from './pages/Assets';
 import PreventiveMaintenance from './pages/PreventiveMaintenance';
@@ -30,7 +29,7 @@ function App() {
     <Router>
       <Layout>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={<Navigate to="/work-orders" replace />} />
           <Route path="/requests" element={<Requests />} />
           <Route path="/work-orders" element={<WorkOrders />} />
           <Route path="/reporting" element={<Reporting />} />

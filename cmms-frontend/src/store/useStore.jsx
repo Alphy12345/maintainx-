@@ -5,6 +5,8 @@ import {
   mockAssets, 
   mockWorkOrders, 
   mockRequests,
+  mockProcedures,
+  mockAssetHealthEvents,
   mockCategories,
   mockInventory, 
   mockPMSchedules, 
@@ -21,6 +23,8 @@ const useStore = create((set, get) => ({
   assets: mockAssets,
   workOrders: mockWorkOrders,
   requests: mockRequests,
+  procedures: mockProcedures,
+  assetHealthEvents: mockAssetHealthEvents,
   categories: mockCategories,
   inventory: mockInventory,
   pmSchedules: mockPMSchedules,
@@ -42,7 +46,50 @@ const useStore = create((set, get) => ({
   // Work Order Actions
   addWorkOrder: (workOrder) => {
     const created = { ...workOrder, id: `WO-${Date.now()}` };
-    set((state) => ({ workOrders: [...state.workOrders, created] }));
+    const nowIso = new Date().toISOString();
+    set((state) => ({
+      workOrders: [...state.workOrders, created],
+      activities: [
+        {
+          id: `ACT-${Date.now()}`,
+          kind: 'created',
+          entityType: 'work_order',
+          entityId: created.id,
+          message: `Created work order ${created.id}`,
+          timestamp: nowIso,
+        },
+        ...state.activities,
+      ],
+    }));
+    return created;
+  },
+
+  // Asset Health Actions
+  addAssetHealthEvent: (event) => {
+    const created = {
+      id: `AHE-${Date.now()}`,
+      assetId: event?.assetId || '',
+      kind: event?.kind || 'status_change',
+      status: event?.status,
+      downtimeType: event?.downtimeType,
+      downtimeReason: event?.downtimeReason,
+      timestamp: event?.timestamp || new Date().toISOString(),
+    };
+    set((state) => ({ assetHealthEvents: [...state.assetHealthEvents, created] }));
+    return created;
+  },
+
+  // Procedure Actions
+  addProcedure: (procedure) => {
+    const created = {
+      id: `PR-${Date.now()}`,
+      name: procedure?.name || 'Procedure',
+      description: procedure?.description || '',
+      fields: Array.isArray(procedure?.fields) ? procedure.fields : [],
+      createdBy: procedure?.createdBy || 'System',
+      createdAt: procedure?.createdAt || new Date().toISOString(),
+    };
+    set((state) => ({ procedures: [...state.procedures, created] }));
     return created;
   },
 
@@ -165,26 +212,105 @@ const useStore = create((set, get) => ({
       lastMaintenanceDate: asset?.lastMaintenanceDate,
       nextMaintenanceDate: asset?.nextMaintenanceDate,
     };
-    set((state) => ({ assets: [...state.assets, next] }));
+    const nowIso = new Date().toISOString();
+    set((state) => ({
+      assets: [...state.assets, next],
+      assetHealthEvents: [
+        ...state.assetHealthEvents,
+        {
+          id: `AHE-${Date.now()}`,
+          assetId: next.id,
+          kind: 'status_change',
+          status: next.status,
+          downtimeType: undefined,
+          downtimeReason: undefined,
+          timestamp: nowIso,
+        },
+      ],
+      activities: [
+        {
+          id: `ACT-${Date.now()}`,
+          kind: 'created',
+          entityType: 'asset',
+          entityId: next.id,
+          message: `Created asset ${next.name}`,
+          timestamp: nowIso,
+        },
+        ...state.activities,
+      ],
+    }));
     return next;
   },
 
-  updateWorkOrder: (id, updates) => set((state) => ({
-    workOrders: state.workOrders.map(wo => 
-      wo.id === id ? { ...wo, ...updates } : wo
-    )
-  })),
+  updateWorkOrder: (id, updates) => {
+    const nowIso = new Date().toISOString();
+    set((state) => {
+      const prev = state.workOrders.find((wo) => wo.id === id) || null;
+      const next = state.workOrders.map((wo) => (wo.id === id ? { ...wo, ...updates } : wo));
+      const newStatus = updates?.status;
+      const statusChanged = prev && typeof newStatus === 'string' && newStatus !== prev.status;
+
+      const activity = statusChanged
+        ? {
+          id: `ACT-${Date.now()}`,
+          kind: 'status_change',
+          entityType: 'work_order',
+          entityId: id,
+          message: `Work order ${id} status changed to ${newStatus}`,
+          timestamp: nowIso,
+        }
+        : {
+          id: `ACT-${Date.now()}`,
+          kind: 'updated',
+          entityType: 'work_order',
+          entityId: id,
+          message: `Updated work order ${id}`,
+          timestamp: nowIso,
+        };
+
+      return {
+        workOrders: next,
+        activities: [activity, ...state.activities],
+      };
+    });
+  },
 
   deleteWorkOrder: (id) => set((state) => ({
     workOrders: state.workOrders.filter(wo => wo.id !== id)
   })),
 
   // Asset Actions
-  updateAssetStatus: (id, status) => set((state) => ({
-    assets: state.assets.map(asset => 
-      asset.id === id ? { ...asset, status } : asset
-    )
-  })),
+  updateAssetStatus: (id, status, meta = {}) => {
+    const nowIso = new Date().toISOString();
+    set((state) => ({
+      assets: state.assets.map((asset) => (
+        asset.id === id ? { ...asset, status } : asset
+      )),
+      assetHealthEvents: [
+        ...state.assetHealthEvents,
+        {
+          id: `AHE-${Date.now()}`,
+          assetId: id,
+          kind: 'status_change',
+          status,
+          downtimeType: meta?.downtimeType,
+          downtimeReason: meta?.downtimeReason,
+          timestamp: meta?.timestamp || nowIso,
+        }
+      ],
+      activities: [
+        {
+          id: `ACT-${Date.now()}`,
+          kind: 'status_change',
+          entityType: 'asset',
+          entityId: id,
+          message: `Asset status changed to ${status}`,
+          timestamp: meta?.timestamp || nowIso,
+        },
+        ...state.activities,
+      ],
+    }));
+  },
 
   // Inventory Actions
   updateInventoryStock: (id, quantity) => set((state) => ({

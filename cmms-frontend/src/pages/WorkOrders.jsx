@@ -1,22 +1,50 @@
 import React, { useRef, useState } from 'react';
-import { Plus, Search, ChevronDown, SlidersHorizontal, Upload, X, ListChecks } from 'lucide-react';
+import { Plus, Search, ChevronDown, SlidersHorizontal, Upload, X, ListChecks, Calendar, MapPin, User } from 'lucide-react';
 import { Button, Badge, Modal } from '../components';
 import useStore from '../store/useStore';
 
 const WorkOrders = () => {
-  const { workOrders, assets, locations, users, categories, inventory, currentUser, addWorkOrder, addUser, addLocation, addAsset, updateWorkOrder } = useStore();
+  const { workOrders, assets, locations, users, categories, inventory, procedures, currentUser, addWorkOrder, addUser, addLocation, addAsset, addProcedure, updateWorkOrder } = useStore();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showAssetsModal, setShowAssetsModal] = useState(false);
+  const [showAddAssetModal, setShowAddAssetModal] = useState(false);
+  const [assetSearch, setAssetSearch] = useState('');
+  const [newAssetForm, setNewAssetForm] = useState({
+    name: '',
+    locationId: '',
+    status: 'running',
+    category: 'Uncategorized',
+    description: '',
+  });
+  const [showProcedureModal, setShowProcedureModal] = useState(false);
+  const [showCreateProcedureModal, setShowCreateProcedureModal] = useState(false);
+  const [procedureSearch, setProcedureSearch] = useState('');
+  const [selectedProcedureId, setSelectedProcedureId] = useState('');
+  const [newProcedureForm, setNewProcedureForm] = useState({
+    name: '',
+    description: '',
+    fields: [],
+  });
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState(null);
   const [activeTab, setActiveTab] = useState('todo');
   const [sortBy, setSortBy] = useState('priority_desc');
   const fileInputRef = useRef(null);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [openFilter, setOpenFilter] = useState('');
+  const [assigneeSearch, setAssigneeSearch] = useState('');
+  const [locationSearch, setLocationSearch] = useState('');
   const [filters, setFilters] = useState({
     status: '',
     priority: '',
     asset: '',
-    assignee: ''
+    assignee: '',
+    location: '',
+    dueDatePreset: '',
+    dueDateCustom: '',
+    categoryId: '',
+    part: '',
   });
+  const [extraFilterKeys, setExtraFilterKeys] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [createForm, setCreateForm] = useState({
     title: '',
@@ -60,6 +88,11 @@ const WorkOrders = () => {
     return user?.name || 'Unassigned';
   };
 
+  const getProcedureName = (procedureId) => {
+    const p = (procedures || []).find((x) => x.id === procedureId);
+    return p?.name || '';
+  };
+
   const getStatusBadge = (status) => {
     const variants = {
       open: { variant: 'warning', label: 'Open' },
@@ -86,6 +119,56 @@ const WorkOrders = () => {
 
   const isDoneStatus = (status) => status === 'completed' || status === 'cancelled';
 
+  const isSameDay = (a, b) => (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+  const endOfDay = (d) => {
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    x.setHours(23, 59, 59, 999);
+    return x;
+  };
+
+  const matchesDueDateFilter = (wo) => {
+    if (!filters.dueDatePreset) return true;
+    if (!wo.dueDate) return false;
+
+    const due = new Date(wo.dueDate);
+    if (Number.isNaN(due.getTime())) return false;
+
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const todayEnd = endOfDay(now);
+    const tomorrow = new Date(todayStart);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStart = startOfDay(tomorrow);
+    const tomorrowEnd = endOfDay(tomorrow);
+    const in7 = new Date(todayStart);
+    in7.setDate(in7.getDate() + 7);
+    const in30 = new Date(todayStart);
+    in30.setDate(in30.getDate() + 30);
+
+    if (filters.dueDatePreset === 'today') return due >= todayStart && due <= todayEnd;
+    if (filters.dueDatePreset === 'tomorrow') return due >= tomorrowStart && due <= tomorrowEnd;
+    if (filters.dueDatePreset === 'next_7') return due >= todayStart && due < endOfDay(in7);
+    if (filters.dueDatePreset === 'next_30') return due >= todayStart && due < endOfDay(in30);
+    if (filters.dueDatePreset === 'this_month') {
+      return due.getFullYear() === now.getFullYear() && due.getMonth() === now.getMonth();
+    }
+    if (filters.dueDatePreset === 'overdue') return due < todayStart;
+    if (filters.dueDatePreset === 'custom') {
+      if (!filters.dueDateCustom) return true;
+      const custom = new Date(filters.dueDateCustom);
+      if (Number.isNaN(custom.getTime())) return true;
+      return isSameDay(due, custom);
+    }
+    return true;
+  };
+
   const filteredWorkOrders = workOrders
     .filter((wo) => {
       const matchesSearch = wo.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -99,8 +182,13 @@ const WorkOrders = () => {
       const matchesPriority = !filters.priority || wo.priority === filters.priority;
       const matchesAsset = !filters.asset || wo.assetId === filters.asset;
       const matchesAssignee = !filters.assignee || wo.assigneeId === filters.assignee;
+      const matchesLocation = !filters.location || wo.locationId === filters.location;
+      const matchesDueDate = matchesDueDateFilter(wo);
 
-      return matchesSearch && matchesTab && matchesStatus && matchesPriority && matchesAsset && matchesAssignee;
+      const matchesCategory = !filters.categoryId || wo.categoryId === filters.categoryId;
+      const matchesPart = !filters.part || wo.partId === filters.part;
+
+      return matchesSearch && matchesTab && matchesStatus && matchesPriority && matchesAsset && matchesAssignee && matchesLocation && matchesDueDate && matchesCategory && matchesPart;
     })
     .sort((a, b) => {
       if (sortBy === 'priority_desc') return (priorityRank[b.priority] || 0) - (priorityRank[a.priority] || 0);
@@ -111,6 +199,14 @@ const WorkOrders = () => {
     });
 
   const selectedWorkOrder = workOrders.find((wo) => wo.id === selectedWorkOrderId) || null;
+
+  const clearAllFilters = () => {
+    setFilters({ status: '', priority: '', asset: '', assignee: '', location: '', dueDatePreset: '', dueDateCustom: '', categoryId: '', part: '' });
+    setExtraFilterKeys([]);
+    setAssigneeSearch('');
+    setLocationSearch('');
+    setOpenFilter('');
+  };
 
   const handleStatusChange = (workOrderId, newStatus) => {
     updateWorkOrder(workOrderId, { status: newStatus });
@@ -136,6 +232,184 @@ const WorkOrders = () => {
       vendorId: '',
       attachments: [],
     });
+  };
+
+  const resetNewAssetForm = () => {
+    setNewAssetForm({
+      name: '',
+      locationId: '',
+      status: 'running',
+      category: 'Uncategorized',
+      description: '',
+    });
+  };
+
+  const resetNewProcedureForm = () => {
+    setNewProcedureForm({
+      name: '',
+      description: '',
+      fields: [
+        { id: `PF-${Date.now()}-${Math.random().toString(16).slice(2)}`, name: 'Field Name', type: 'text', required: false },
+      ],
+    });
+  };
+
+  const procedureFieldTypes = [
+    { key: 'checkbox', label: 'Checkbox' },
+    { key: 'text', label: 'Text Field' },
+    { key: 'number', label: 'Number Field' },
+    { key: 'amount', label: 'Amount ($)' },
+    { key: 'multiple_choice', label: 'Multiple Choice' },
+    { key: 'checklist', label: 'Checklist' },
+    { key: 'inspection_check', label: 'Inspection Check' },
+  ];
+
+  const addProcedureField = () => {
+    setNewProcedureForm((p) => ({
+      ...p,
+      fields: [
+        ...(p.fields || []),
+        { id: `PF-${Date.now()}-${Math.random().toString(16).slice(2)}`, name: '', type: 'text', required: false },
+      ],
+    }));
+  };
+
+  const ensureFieldTypeDefaults = (field) => {
+    if (!field) return field;
+    if (field.type === 'multiple_choice' || field.type === 'checklist') {
+      const existing = Array.isArray(field.options) ? field.options : [];
+      if (existing.length > 0) return { ...field, options: existing };
+      return {
+        ...field,
+        options: [
+          { id: `OPT-${Date.now()}-1`, label: 'Option 1' },
+          { id: `OPT-${Date.now()}-2`, label: 'Option 2' },
+        ],
+      };
+    }
+    if (field.type === 'inspection_check') {
+      return {
+        ...field,
+        options: [
+          { id: 'pass', label: 'Pass' },
+          { id: 'flag', label: 'Flag' },
+          { id: 'fail', label: 'Fail' },
+        ],
+      };
+    }
+
+    if ('options' in field) {
+      const { options, ...rest } = field;
+      return rest;
+    }
+    return field;
+  };
+
+  const updateProcedureField = (fieldId, updates) => {
+    setNewProcedureForm((p) => ({
+      ...p,
+      fields: (p.fields || []).map((f) => {
+        if (f.id !== fieldId) return f;
+        const next = ensureFieldTypeDefaults({ ...f, ...updates });
+        return next;
+      }),
+    }));
+  };
+
+  const removeProcedureField = (fieldId) => {
+    setNewProcedureForm((p) => ({
+      ...p,
+      fields: (p.fields || []).filter((f) => f.id !== fieldId),
+    }));
+  };
+
+  const addFieldOption = (fieldId) => {
+    setNewProcedureForm((p) => ({
+      ...p,
+      fields: (p.fields || []).map((f) => {
+        if (f.id !== fieldId) return f;
+        const existing = Array.isArray(f.options) ? f.options : [];
+        const nextIndex = existing.length + 1;
+        return {
+          ...f,
+          options: [...existing, { id: `OPT-${Date.now()}-${Math.random().toString(16).slice(2)}`, label: `Option ${nextIndex}` }],
+        };
+      }),
+    }));
+  };
+
+  const updateFieldOption = (fieldId, optionId, label) => {
+    setNewProcedureForm((p) => ({
+      ...p,
+      fields: (p.fields || []).map((f) => {
+        if (f.id !== fieldId) return f;
+        return {
+          ...f,
+          options: (f.options || []).map((o) => (o.id === optionId ? { ...o, label } : o)),
+        };
+      }),
+    }));
+  };
+
+  const removeFieldOption = (fieldId, optionId) => {
+    setNewProcedureForm((p) => ({
+      ...p,
+      fields: (p.fields || []).map((f) => {
+        if (f.id !== fieldId) return f;
+        return {
+          ...f,
+          options: (f.options || []).filter((o) => o.id !== optionId),
+        };
+      }),
+    }));
+  };
+
+  const handleCreateProcedureFromModal = () => {
+    const name = (newProcedureForm.name || '').trim();
+    if (!name) return;
+
+    const created = addProcedure({
+      name,
+      description: (newProcedureForm.description || '').trim(),
+      fields: (newProcedureForm.fields || []).map((f) => ({
+        id: f.id,
+        name: (f.name || '').trim(),
+        type: f.type,
+        required: !!f.required,
+        options: Array.isArray(f.options) ? f.options.map((o) => ({ id: o.id, label: (o.label || '').trim() })).filter((o) => o.label) : undefined,
+      })).filter((f) => f.name),
+      createdBy: currentUser?.id || 'system',
+      createdAt: new Date().toISOString(),
+    });
+
+    setCreateForm((p) => ({ ...p, procedure: created.id }));
+    setSelectedProcedureId(created.id);
+    setShowCreateProcedureModal(false);
+    setShowProcedureModal(false);
+    resetNewProcedureForm();
+  };
+
+  const handleCreateAssetFromModal = () => {
+    const name = (newAssetForm.name || '').trim();
+    if (!name) return;
+
+    const created = addAsset({
+      name,
+      category: newAssetForm.category || 'Uncategorized',
+      locationId: newAssetForm.locationId || '',
+      status: newAssetForm.status || 'running',
+      description: (newAssetForm.description || '').trim() || undefined,
+    });
+
+    setCreateForm((p) => ({
+      ...p,
+      assetName: created.name,
+      locationName: p.locationName || (created.locationId ? (locations.find((l) => l.id === created.locationId)?.name || '') : ''),
+    }));
+
+    setShowAddAssetModal(false);
+    resetNewAssetForm();
+    setShowAssetsModal(false);
   };
 
   const normalize = (s) => (s || '').trim().toLowerCase();
@@ -296,66 +570,363 @@ const WorkOrders = () => {
             </div>
 
             <div className="relative">
-              <select
-                value={filters.assignee}
-                onChange={(e) => setFilters({ ...filters, assignee: e.target.value })}
-                className="appearance-none pl-3 pr-8 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 focus:ring-primary-500 focus:border-primary-500"
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'assignee' ? '' : 'assignee')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
               >
-                <option value="">Assigned To</option>
-                {users.map((user) => (
-                  <option key={user.id} value={user.id}>{user.name}</option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <User className="h-4 w-4 text-gray-500" />
+                Assigned To
+                <ChevronDown className="h-4 w-4 text-gray-400" />
+              </button>
+
+              {openFilter === 'assignee' && (
+                <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+                  <div className="p-2 border-b border-gray-100">
+                    <input
+                      value={assigneeSearch}
+                      onChange={(e) => setAssigneeSearch(e.target.value)}
+                      placeholder="Search"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 text-sm bg-white"
+                    />
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    <button
+                      type="button"
+                      onClick={() => { setFilters((p) => ({ ...p, assignee: '' })); setOpenFilter(''); }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      Unassigned / Any
+                    </button>
+                    {users
+                      .filter((u) => (u?.name || '').toLowerCase().includes(assigneeSearch.toLowerCase()) || (u?.email || '').toLowerCase().includes(assigneeSearch.toLowerCase()))
+                      .map((u) => (
+                        <button
+                          key={u.id}
+                          type="button"
+                          onClick={() => { setFilters((p) => ({ ...p, assignee: u.id })); setOpenFilter(''); }}
+                          className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        >
+                          {u.name}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="relative">
-              <select
-                value={filters.asset}
-                onChange={(e) => setFilters({ ...filters, asset: e.target.value })}
-                className="appearance-none pl-3 pr-8 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 focus:ring-primary-500 focus:border-primary-500"
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'dueDate' ? '' : 'dueDate')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
               >
-                <option value="">Asset</option>
-                {assets.map((asset) => (
-                  <option key={asset.id} value={asset.id}>{asset.name}</option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Calendar className="h-4 w-4 text-gray-500" />
+                Due Date
+                <ChevronDown className="h-4 w-4 text-gray-400" />
+              </button>
+
+              {openFilter === 'dueDate' && (
+                <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+                  <div className="p-2">
+                    {[ 
+                      { key: '', label: 'Any' },
+                      { key: 'today', label: 'Today' },
+                      { key: 'tomorrow', label: 'Tomorrow' },
+                      { key: 'next_7', label: 'Next 7 Days' },
+                      { key: 'next_30', label: 'Next 30 Days' },
+                      { key: 'this_month', label: 'This Month' },
+                      { key: 'overdue', label: 'Overdue' },
+                      { key: 'custom', label: 'Custom Date' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.key || 'any'}
+                        type="button"
+                        onClick={() => {
+                          setFilters((p) => ({ ...p, dueDatePreset: opt.key, dueDateCustom: opt.key === 'custom' ? p.dueDateCustom : '' }));
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded"
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+
+                    {filters.dueDatePreset === 'custom' && (
+                      <div className="pt-2">
+                        <input
+                          type="date"
+                          value={filters.dueDateCustom}
+                          onChange={(e) => setFilters((p) => ({ ...p, dueDateCustom: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 text-sm bg-white"
+                        />
+                        <div className="mt-2 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => setOpenFilter('')}
+                            className="px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+                          >
+                            Done
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="relative">
-              <select
-                value={filters.priority}
-                onChange={(e) => setFilters({ ...filters, priority: e.target.value })}
-                className="appearance-none pl-3 pr-8 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 focus:ring-primary-500 focus:border-primary-500"
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'location' ? '' : 'location')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
               >
-                <option value="">Priority</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <MapPin className="h-4 w-4 text-gray-500" />
+                Location
+                <ChevronDown className="h-4 w-4 text-gray-400" />
+              </button>
+
+              {openFilter === 'location' && (
+                <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+                  <div className="p-2 border-b border-gray-100">
+                    <input
+                      value={locationSearch}
+                      onChange={(e) => setLocationSearch(e.target.value)}
+                      placeholder="Search"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 text-sm bg-white"
+                    />
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    <button
+                      type="button"
+                      onClick={() => { setFilters((p) => ({ ...p, location: '' })); setOpenFilter(''); }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      Any
+                    </button>
+                    {locations
+                      .filter((l) => (l?.name || '').toLowerCase().includes(locationSearch.toLowerCase()))
+                      .map((l) => (
+                        <button
+                          key={l.id}
+                          type="button"
+                          onClick={() => { setFilters((p) => ({ ...p, location: l.id })); setOpenFilter(''); }}
+                          className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        >
+                          {l.name}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="relative">
-              <select
-                value={filters.status}
-                onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-                className="appearance-none pl-3 pr-8 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 focus:ring-primary-500 focus:border-primary-500"
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'priority' ? '' : 'priority')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
               >
-                <option value="">Status</option>
-                <option value="open">Open</option>
-                <option value="in_progress">In Progress</option>
-                <option value="completed">Completed</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                Priority
+                <ChevronDown className="h-4 w-4 text-gray-400" />
+              </button>
+
+              {openFilter === 'priority' && (
+                <div className="absolute z-50 mt-2 w-56 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+                  {[
+                    { key: '', label: 'Any' },
+                    { key: 'low', label: 'Low' },
+                    { key: 'medium', label: 'Medium' },
+                    { key: 'high', label: 'High' },
+                    { key: 'critical', label: 'Critical' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.key || 'any'}
+                      type="button"
+                      onClick={() => { setFilters((p) => ({ ...p, priority: opt.key })); setOpenFilter(''); }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'addFilter' ? '' : 'addFilter')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <span className="text-lg leading-none">+</span>
+                Add Filter
+              </button>
+
+              {openFilter === 'addFilter' && (
+                <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+                  <div className="max-h-72 overflow-y-auto p-2">
+                    {[
+                      { key: 'asset', label: 'Asset' },
+                      { key: 'status', label: 'Status' },
+                      { key: 'categoryId', label: 'Category' },
+                      { key: 'part', label: 'Part' },
+                    ].filter((f) => !extraFilterKeys.includes(f.key)).map((f) => (
+                      <button
+                        key={f.key}
+                        type="button"
+                        onClick={() => { setExtraFilterKeys((p) => [...p, f.key]); setOpenFilter(''); }}
+                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded"
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                    {extraFilterKeys.length === 4 && (
+                      <div className="px-3 py-2 text-sm text-gray-500">No more filters</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {extraFilterKeys.includes('asset') && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setOpenFilter(openFilter === 'asset' ? '' : 'asset')}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Asset
+                  <ChevronDown className="h-4 w-4 text-gray-400" />
+                </button>
+                {openFilter === 'asset' && (
+                  <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => { setFilters((p) => ({ ...p, asset: '' })); setOpenFilter(''); }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      Any
+                    </button>
+                    {assets.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => { setFilters((p) => ({ ...p, asset: a.id })); setOpenFilter(''); }}
+                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        {a.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {extraFilterKeys.includes('status') && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setOpenFilter(openFilter === 'status' ? '' : 'status')}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Status
+                  <ChevronDown className="h-4 w-4 text-gray-400" />
+                </button>
+                {openFilter === 'status' && (
+                  <div className="absolute z-50 mt-2 w-56 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+                    {[
+                      { key: '', label: 'Any' },
+                      { key: 'open', label: 'Open' },
+                      { key: 'in_progress', label: 'In Progress' },
+                      { key: 'completed', label: 'Completed' },
+                      { key: 'cancelled', label: 'Cancelled' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.key || 'any'}
+                        type="button"
+                        onClick={() => { setFilters((p) => ({ ...p, status: opt.key })); setOpenFilter(''); }}
+                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {extraFilterKeys.includes('categoryId') && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setOpenFilter(openFilter === 'categoryId' ? '' : 'categoryId')}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Category
+                  <ChevronDown className="h-4 w-4 text-gray-400" />
+                </button>
+                {openFilter === 'categoryId' && (
+                  <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => { setFilters((p) => ({ ...p, categoryId: '' })); setOpenFilter(''); }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      Any
+                    </button>
+                    {(categories || []).map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => { setFilters((p) => ({ ...p, categoryId: c.id })); setOpenFilter(''); }}
+                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {extraFilterKeys.includes('part') && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setOpenFilter(openFilter === 'part' ? '' : 'part')}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Part
+                  <ChevronDown className="h-4 w-4 text-gray-400" />
+                </button>
+                {openFilter === 'part' && (
+                  <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => { setFilters((p) => ({ ...p, part: '' })); setOpenFilter(''); }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      Any
+                    </button>
+                    {(inventory || []).map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => { setFilters((prev) => ({ ...prev, part: p.id })); setOpenFilter(''); }}
+                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <button
               type="button"
-              onClick={() => setFilters({ status: '', priority: '', asset: '', assignee: '' })}
+              onClick={clearAllFilters}
               className="px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-600 hover:bg-gray-50"
             >
               Clear
@@ -690,6 +1261,7 @@ const WorkOrders = () => {
               />
               <button
                 type="button"
+                onClick={() => { setShowAssetsModal(true); setAssetSearch(''); }}
                 className="mt-2 inline-flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700"
               >
                 <span className="text-lg leading-none">+</span>
@@ -700,20 +1272,51 @@ const WorkOrders = () => {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Procedure</label>
-            <div className="border border-gray-200 rounded-md p-4 bg-white text-center">
-              <div className="inline-flex items-center gap-2 text-sm text-gray-700">
-                <ListChecks className="h-4 w-4 text-gray-500" />
-                Create or attach new Form, Procedure or Checklist
-              </div>
-              <div className="mt-3">
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-2 px-4 py-2 border border-primary-500 text-primary-700 rounded-md text-sm hover:bg-primary-50"
-                >
-                  <span className="text-lg leading-none">+</span>
-                  Add Procedure
-                </button>
-              </div>
+            <div className="border border-gray-200 rounded-md p-4 bg-white">
+              {createForm.procedure ? (
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-sm text-gray-700">
+                      <ListChecks className="h-4 w-4 text-gray-500" />
+                      <span className="font-medium truncate">{getProcedureName(createForm.procedure)}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500 truncate">Procedure attached</div>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { setCreateForm((p) => ({ ...p, procedure: '' })); setSelectedProcedureId(''); }}
+                      className="px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      Remove
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowProcedureModal(true); setProcedureSearch(''); setSelectedProcedureId(createForm.procedure || ''); }}
+                      className="inline-flex items-center gap-2 px-4 py-2 border border-primary-500 text-primary-700 rounded-md text-sm hover:bg-primary-50"
+                    >
+                      Change
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <div className="inline-flex items-center gap-2 text-sm text-gray-700">
+                    <ListChecks className="h-4 w-4 text-gray-500" />
+                    Create or attach new Form, Procedure or Checklist
+                  </div>
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={() => { setShowProcedureModal(true); setProcedureSearch(''); setSelectedProcedureId(''); }}
+                      className="inline-flex items-center gap-2 px-4 py-2 border border-primary-500 text-primary-700 rounded-md text-sm hover:bg-primary-50"
+                    >
+                      <span className="text-lg leading-none">+</span>
+                      Add Procedure
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -900,6 +1503,402 @@ const WorkOrders = () => {
             </Button>
             <Button onClick={handleCreate} disabled={!createForm.title.trim()}>
               Create
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showAssetsModal}
+        onClose={() => setShowAssetsModal(false)}
+        title="Assets"
+        size="md"
+      >
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                value={assetSearch}
+                onChange={(e) => setAssetSearch(e.target.value)}
+                placeholder="Search"
+                className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 text-sm bg-white"
+              />
+            </div>
+            <Button
+              onClick={() => { setShowAddAssetModal(true); resetNewAssetForm(); }}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add New Asset
+            </Button>
+          </div>
+
+          <div className="border border-gray-200 rounded-md overflow-hidden">
+            <div className="max-h-72 overflow-y-auto divide-y divide-gray-100">
+              {assets
+                .filter((a) => (a?.name || '').toLowerCase().includes(assetSearch.toLowerCase()))
+                .map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => { setCreateForm((p) => ({ ...p, assetName: a.name })); setShowAssetsModal(false); }}
+                    className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <div className="font-medium">{a.name}</div>
+                    <div className="text-xs text-gray-500">{a.id}</div>
+                  </button>
+                ))}
+
+              {assets.filter((a) => (a?.name || '').toLowerCase().includes(assetSearch.toLowerCase())).length === 0 && (
+                <div className="px-3 py-6 text-sm text-gray-500 text-center">No assets found.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showAddAssetModal}
+        onClose={() => { setShowAddAssetModal(false); resetNewAssetForm(); }}
+        title="Add New Asset"
+        size="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Asset Name (Required)</label>
+            <input
+              value={newAssetForm.name}
+              onChange={(e) => setNewAssetForm((p) => ({ ...p, name: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+              placeholder="Start typing..."
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
+              <div className="relative">
+                <select
+                  value={newAssetForm.locationId}
+                  onChange={(e) => setNewAssetForm((p) => ({ ...p, locationId: e.target.value }))}
+                  className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                >
+                  <option value="">None</option>
+                  {locations.map((l) => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <div className="relative">
+                <select
+                  value={newAssetForm.status}
+                  onChange={(e) => setNewAssetForm((p) => ({ ...p, status: e.target.value }))}
+                  className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                >
+                  <option value="running">Running</option>
+                  <option value="down">Down</option>
+                  <option value="idle">Idle</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+            <input
+              value={newAssetForm.category}
+              onChange={(e) => setNewAssetForm((p) => ({ ...p, category: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+              placeholder="Uncategorized"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea
+              rows={3}
+              value={newAssetForm.description}
+              onChange={(e) => setNewAssetForm((p) => ({ ...p, description: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+              placeholder="Add a description"
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => { setShowAddAssetModal(false); resetNewAssetForm(); }}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateAssetFromModal} disabled={!newAssetForm.name.trim()}>
+              Save Asset
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showProcedureModal}
+        onClose={() => { setShowProcedureModal(false); setProcedureSearch(''); setSelectedProcedureId(''); }}
+        title="Add Procedure"
+        size="lg"
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                value={procedureSearch}
+                onChange={(e) => setProcedureSearch(e.target.value)}
+                placeholder="Search Procedure Templates"
+                className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 text-sm bg-white"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => { setShowCreateProcedureModal(true); resetNewProcedureForm(); }}
+              className="text-sm text-primary-600 hover:text-primary-700"
+            >
+              + Create a New Procedure
+            </button>
+          </div>
+
+          {(procedures || []).length === 0 ? (
+            <div className="border border-gray-200 rounded-md p-10 bg-white text-center">
+              <div className="mx-auto h-14 w-14 rounded-2xl bg-primary-50 flex items-center justify-center">
+                <ListChecks className="h-7 w-7 text-primary-600" />
+              </div>
+              <div className="mt-6 text-2xl font-bold text-gray-900">Start adding Procedures</div>
+              <div className="mt-2 text-sm text-gray-600">
+                Press <span className="font-medium text-primary-600">+ Create a New Procedure</span> button above to add your first Procedure.
+              </div>
+            </div>
+          ) : (
+            <div className="border border-gray-200 rounded-md overflow-hidden">
+              <div className="max-h-80 overflow-y-auto divide-y divide-gray-100">
+                {(procedures || [])
+                  .filter((p) => (p?.name || '').toLowerCase().includes(procedureSearch.toLowerCase()))
+                  .map((p) => {
+                    const selected = selectedProcedureId === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setSelectedProcedureId(p.id)}
+                        className={`w-full text-left px-3 py-3 text-sm hover:bg-gray-50 ${selected ? 'bg-primary-50' : 'bg-white'}`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-medium text-gray-900 truncate">{p.name}</div>
+                            <div className="text-xs text-gray-500 truncate">{(p.fields || []).length} fields</div>
+                          </div>
+                          <div className={`h-4 w-4 rounded border ${selected ? 'bg-primary-600 border-primary-600' : 'bg-white border-gray-300'}`} />
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => { setShowProcedureModal(false); setProcedureSearch(''); setSelectedProcedureId(''); }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!selectedProcedureId) return;
+                setCreateForm((p) => ({ ...p, procedure: selectedProcedureId }));
+                setShowProcedureModal(false);
+                setProcedureSearch('');
+              }}
+              disabled={!selectedProcedureId || (procedures || []).length === 0}
+            >
+              Add Procedure
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showCreateProcedureModal}
+        onClose={() => { setShowCreateProcedureModal(false); resetNewProcedureForm(); }}
+        title="Create a New Procedure"
+        size="xl"
+      >
+        <div className="space-y-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Enter Procedure Name</label>
+            <input
+              value={newProcedureForm.name}
+              onChange={(e) => setNewProcedureForm((p) => ({ ...p, name: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+              placeholder="Procedure name"
+            />
+          </div>
+
+          <div>
+            <button
+              type="button"
+              onClick={() => setNewProcedureForm((p) => ({ ...p, description: p.description || '' }))}
+              className="text-sm text-primary-600 hover:text-primary-700"
+            >
+              + Add Description
+            </button>
+            {newProcedureForm.description !== '' && (
+              <textarea
+                rows={3}
+                value={newProcedureForm.description}
+                onChange={(e) => setNewProcedureForm((p) => ({ ...p, description: e.target.value }))}
+                className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                placeholder="Description"
+              />
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-12 space-y-4">
+              {(newProcedureForm.fields || []).map((f) => (
+                <div key={f.id} className="border border-gray-200 rounded-md p-4 bg-white">
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                    <div className="md:col-span-5">
+                      <input
+                        value={f.name}
+                        readOnly
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                        placeholder="Field Name"
+                      />
+                    </div>
+                    <div className="md:col-span-5">
+                      <div className="relative">
+                        <select
+                          value={f.type}
+                          onChange={(e) => updateProcedureField(f.id, { type: e.target.value })}
+                          className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                        >
+                          {procedureFieldTypes.map((t) => (
+                            <option key={t.key} value={t.key}>{t.label}</option>
+                          ))}
+                        </select>
+                        <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      </div>
+                    </div>
+                    <div className="md:col-span-2 flex items-center justify-end gap-3">
+                      <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={!!f.required}
+                          onChange={(e) => updateProcedureField(f.id, { required: e.target.checked })}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        Required
+                      </label>
+                    </div>
+                  </div>
+
+                  {f.type === 'text' && (
+                    <div className="mt-3">
+                      <textarea
+                        rows={2}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                        placeholder="Text will be entered here"
+                        readOnly
+                      />
+                    </div>
+                  )}
+
+                  {f.type === 'checkbox' && (
+                    <div className="mt-3">
+                      <div className="h-10" />
+                    </div>
+                  )}
+
+                  {f.type === 'number' && (
+                    <div className="mt-3">
+                      <input
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                        placeholder="Number will be entered here"
+                        readOnly
+                      />
+                    </div>
+                  )}
+
+                  {f.type === 'amount' && (
+                    <div className="mt-3">
+                      <div className="flex items-center border border-gray-300 rounded-md overflow-hidden">
+                        <div className="px-3 py-2 text-gray-600 bg-gray-50">$</div>
+                        <input
+                          className="flex-1 px-3 py-2 focus:ring-primary-500 focus:border-primary-500 bg-white"
+                          placeholder="Amount will be entered here"
+                          readOnly
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {(f.type === 'multiple_choice' || f.type === 'checklist') && (
+                    <div className="mt-3 space-y-2">
+                      {(Array.isArray(f.options) ? f.options : []).map((o) => (
+                        <div key={o.id} className="flex items-center gap-2">
+                          <div className="text-gray-400 select-none">⋮⋮</div>
+                          <input
+                            value={o.label}
+                            onChange={(e) => updateFieldOption(f.id, o.id, e.target.value)}
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                            placeholder="Option"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeFieldOption(f.id, o.id)}
+                            className="text-gray-400 hover:text-gray-600"
+                            title="Remove"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => addFieldOption(f.id)}
+                        className="text-sm text-primary-600 hover:text-primary-700"
+                      >
+                        + Add Option
+                      </button>
+                    </div>
+                  )}
+
+                  {f.type === 'inspection_check' && (
+                    <div className="mt-3 grid grid-cols-3 gap-3">
+                      {[
+                        { key: 'Pass', color: 'text-green-600' },
+                        { key: 'Flag', color: 'text-orange-600' },
+                        { key: 'Fail', color: 'text-red-600' },
+                      ].map((x) => (
+                        <div
+                          key={x.key}
+                          className={`px-3 py-2 border border-gray-300 rounded-md text-sm text-center bg-white ${x.color}`}
+                        >
+                          {x.key}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => { setShowCreateProcedureModal(false); resetNewProcedureForm(); }}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateProcedureFromModal} disabled={!newProcedureForm.name.trim()}>
+              Add Procedure
             </Button>
           </div>
         </div>

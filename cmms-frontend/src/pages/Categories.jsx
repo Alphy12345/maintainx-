@@ -105,13 +105,13 @@ const Categories = () => {
                   key={c.id}
                   type="button"
                   onClick={() => setSelectedId(c.id)}
-                  className={`w-full text-left px-4 py-4 hover:bg-gray-50 ${active ? 'bg-primary-50' : 'bg-white'}`}
+                  className={`w-full text-left px-4 py-4 ${active ? 'bg-gray-900/40' : 'bg-transparent'} hover:bg-gray-900/30`}
                 >
                   <div className="flex items-center gap-3">
                     <div className={`h-9 w-9 rounded-full border flex items-center justify-center ${cls}`}>
                       <Tag className="h-4 w-4" />
                     </div>
-                    <div className="font-medium text-gray-900 truncate">{c.name}</div>
+                    <div className={`font-medium truncate ${active ? 'text-white' : 'text-gray-200'}`}>{c.name}</div>
                   </div>
                 </button>
               );

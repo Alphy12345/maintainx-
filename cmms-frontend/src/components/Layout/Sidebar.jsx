@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
-  LayoutDashboard, 
   Wrench, 
   Package, 
   MessageSquare,
@@ -26,7 +25,6 @@ import {
 import useStore from '../../store/useStore';
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Work Orders', href: '/work-orders', icon: Wrench },
   { name: 'Reporting', href: '/reporting', icon: BarChart3 },
   { name: 'Requests', href: '/requests', icon: ClipboardList },
@@ -101,8 +99,8 @@ const Sidebar = () => {
                       className={`
                         w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200
                         ${parentActive
-                          ? 'bg-primary-50 text-primary-700 border-r-2 border-primary-700'
-                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                          ? 'bg-gray-900/40 text-white border-r-2 border-primary-500'
+                          : 'text-gray-300 hover:bg-gray-900/30 hover:text-white'
                         }
                       `}
                       onClick={() => {
@@ -131,8 +129,8 @@ const Sidebar = () => {
                             className={({ isActive }) => `
                               block px-3 py-2 text-sm rounded-md transition-colors duration-200
                               ${isActive
-                                ? 'bg-primary-50 text-primary-700'
-                                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                                ? 'bg-gray-900/40 text-white'
+                                : 'text-gray-300 hover:bg-gray-900/30 hover:text-white'
                               }
                             `}
                             onClick={() => {
@@ -157,8 +155,8 @@ const Sidebar = () => {
                     className={({ isActive }) => `
                       flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200
                       ${isActive
-                        ? 'bg-primary-50 text-primary-700 border-r-2 border-primary-700'
-                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                        ? 'bg-gray-900/40 text-white border-r-2 border-primary-500'
+                        : 'text-gray-300 hover:bg-gray-900/30 hover:text-white'
                       }
                     `}
                     onClick={() => {

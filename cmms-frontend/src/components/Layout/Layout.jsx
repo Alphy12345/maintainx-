@@ -7,10 +7,10 @@ const Layout = ({ children }) => {
   const { sidebarOpen } = useStore();
 
   return (
-    <div className="min-h-screen bg-gray-50 lg:flex">
+    <div className="h-screen overflow-hidden bg-gray-50 lg:flex">
       <Sidebar />
 
-      <div className="flex-1 min-w-0 flex flex-col min-h-screen">
+      <div className="flex-1 min-w-0 flex flex-col h-screen">
         <TopBar />
         
         <main className="p-6 flex-1 overflow-y-auto">
