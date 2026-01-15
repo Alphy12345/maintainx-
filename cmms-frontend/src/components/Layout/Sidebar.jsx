@@ -9,8 +9,6 @@ import {
   Boxes,
   BookOpen,
   ChevronDown,
-  Calendar, 
-  Archive, 
   MapPin, 
   ClipboardList,
   BarChart3, 
@@ -43,8 +41,6 @@ const navigation = [
   },
   { name: 'Meters', href: '/meters', icon: Gauge },
   { name: 'Automations', href: '/automations', icon: Zap },
-  { name: 'Preventive Maintenance', href: '/pm', icon: Calendar },
-  { name: 'Inventory', href: '/inventory', icon: Archive },
   { name: 'Locations', href: '/locations', icon: MapPin },
   { name: 'Teams / Users', href: '/teams-users', icon: Users },
   { name: 'Vendors', href: '/vendors', icon: Truck },
@@ -71,15 +67,15 @@ const Sidebar = () => {
 
       {/* Sidebar */}
       <div className={`
-        fixed inset-y-0 left-0 z-50 w-64 shrink-0 bg-white shadow-lg transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0
+        fixed inset-y-0 left-0 z-50 w-64 shrink-0 bg-white dark:bg-gray-950 shadow-lg transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
         <div className="flex h-full flex-col">
-        <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200">
-          <h1 className="text-xl font-bold text-gray-900">CMMS Pro</h1>
+        <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200 dark:border-gray-800">
+          <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">CMMS Pro</h1>
           <button
             onClick={toggleSidebar}
-            className="lg:hidden p-1 rounded-md text-gray-400 hover:text-gray-600"
+            className="lg:hidden p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
           >
             <X className="w-5 h-5" />
           </button>
@@ -176,14 +172,14 @@ const Sidebar = () => {
         </nav>
 
         {/* User info */}
-        <div className="mt-auto p-4 border-t border-gray-200">
+        <div className="mt-auto p-4 border-t border-gray-200 dark:border-gray-800">
           <div className="flex items-center">
-            <div className="h-8 w-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-600">
+            <div className="h-8 w-8 rounded-full bg-gray-100 dark:bg-gray-900 flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-200">
               {(currentUser?.name || 'U').trim().slice(0, 1).toUpperCase()}
             </div>
             <div className="ml-3">
-              <p className="text-sm font-medium text-gray-900">{currentUser?.name || 'Account'}</p>
-              <p className="text-xs text-gray-500">{currentUser?.email || ''}</p>
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{currentUser?.name || 'Account'}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{currentUser?.email || ''}</p>
             </div>
           </div>
         </div>

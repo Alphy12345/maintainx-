@@ -31,7 +31,7 @@ const TopBar = () => {
   };
 
   return (
-    <header className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-30 bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 px-4 sm:px-6 lg:px-8">
       <div className="flex items-center justify-between h-16">
         {/* Left side */}
         <div className="flex items-center">
@@ -58,17 +58,29 @@ const TopBar = () => {
         <div className="flex items-center space-x-4">
           {/* Dark mode toggle */}
           <button
+            type="button"
             onClick={toggleDarkMode}
-            className="p-2 rounded-md text-gray-400 hover:text-gray-600 transition-colors"
+            className="inline-flex items-center gap-2 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
+            aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={darkMode ? 'Light mode' : 'Dark mode'}
           >
-            {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            <span className="text-gray-500 dark:text-gray-300">
+              {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </span>
+            <span
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${darkMode ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-700'}`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${darkMode ? 'translate-x-4' : 'translate-x-1'}`}
+              />
+            </span>
           </button>
 
           {/* Notifications */}
           <div className="relative">
             <button
               onClick={() => setShowNotifications(!showNotifications)}
-              className="relative p-2 rounded-md text-gray-400 hover:text-gray-600 transition-colors"
+              className="relative p-2 rounded-md text-gray-400 dark:text-gray-300 hover:text-gray-600 dark:hover:text-white transition-colors"
             >
               <Bell className="w-5 h-5" />
               {unreadCount > 0 && (
@@ -90,11 +102,11 @@ const TopBar = () => {
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: -10 }}
                   transition={{ duration: 0.2 }}
-                  className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-50"
+                  className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-950 rounded-lg shadow-lg border border-gray-200 dark:border-gray-800 z-50"
                 >
-                  <div className="p-4 border-b border-gray-200">
+                  <div className="p-4 border-b border-gray-200 dark:border-gray-800">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-gray-900">Notifications</h3>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Notifications</h3>
                       {unreadCount > 0 && (
                         <button
                           onClick={handleMarkAllAsRead}
@@ -117,16 +129,16 @@ const TopBar = () => {
                           key={notification.id}
                           onClick={() => handleNotificationClick(notification.id)}
                           className={`
-                            p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors
+                            p-4 border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer transition-colors
                             ${!notification.read ? 'bg-blue-50' : ''}
                           `}
                         >
                           <div className="flex items-start">
                             <div className="flex-1">
-                              <p className="text-sm font-medium text-gray-900">
+                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
                                 {notification.title}
                               </p>
-                              <p className="text-sm text-gray-600 mt-1">
+                              <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
                                 {notification.message}
                               </p>
                               <p className="text-xs text-gray-400 mt-1">
@@ -152,15 +164,15 @@ const TopBar = () => {
           <div className="relative">
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center space-x-2 p-2 rounded-md hover:bg-gray-100 transition-colors"
+              className="flex items-center space-x-2 p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
             >
-              <div className="h-8 w-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-600">
+              <div className="h-8 w-8 rounded-full bg-gray-100 dark:bg-gray-900 flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-200">
                 {(currentUser?.name || 'U').trim().slice(0, 1).toUpperCase()}
               </div>
-              <span className="hidden md:block text-sm font-medium text-gray-700">
+              <span className="hidden md:block text-sm font-medium text-gray-700 dark:text-gray-200">
                 {currentUser?.name || 'Account'}
               </span>
-              <ChevronDown className="w-4 h-4 text-gray-400" />
+              <ChevronDown className="w-4 h-4 text-gray-400 dark:text-gray-500" />
             </button>
 
             {/* User dropdown */}
@@ -171,27 +183,27 @@ const TopBar = () => {
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: -10 }}
                   transition={{ duration: 0.2 }}
-                  className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50"
+                  className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-950 rounded-lg shadow-lg border border-gray-200 dark:border-gray-800 z-50"
                 >
                   <div className="py-1">
                     <a
                       href="#"
-                      className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      className="flex items-center px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-900"
                     >
                       <User className="w-4 h-4 mr-3" />
                       Profile
                     </a>
                     <a
                       href="#"
-                      className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      className="flex items-center px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-900"
                     >
                       <Settings className="w-4 h-4 mr-3" />
                       Settings
                     </a>
-                    <hr className="my-1" />
+                    <hr className="my-1 border-gray-200 dark:border-gray-800" />
                     <a
                       href="#"
-                      className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      className="flex items-center px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-900"
                     >
                       <LogOut className="w-4 h-4 mr-3" />
                       Sign out

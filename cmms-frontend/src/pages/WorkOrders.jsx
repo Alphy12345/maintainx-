@@ -58,6 +58,13 @@ const WorkOrders = () => {
     dueDate: '',
     startDate: '',
     recurrence: 'does_not_repeat',
+    recurrenceDays: ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'],
+    recurrenceIntervalWeeks: 1,
+    recurrenceIntervalMonths: 1,
+    recurrenceDayOfMonth: new Date().getDate(),
+    recurrenceWeekOfMonth: 1,
+    recurrenceWeekday: 'mon',
+    recurrenceIntervalYears: 1,
     workType: 'reactive',
     priority: 'low',
     parts: '',
@@ -225,6 +232,13 @@ const WorkOrders = () => {
       dueDate: '',
       startDate: '',
       recurrence: 'does_not_repeat',
+      recurrenceDays: ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'],
+      recurrenceIntervalWeeks: 1,
+      recurrenceIntervalMonths: 1,
+      recurrenceDayOfMonth: new Date().getDate(),
+      recurrenceWeekOfMonth: 1,
+      recurrenceWeekday: 'mon',
+      recurrenceIntervalYears: 1,
       workType: 'reactive',
       priority: 'low',
       parts: '',
@@ -497,6 +511,17 @@ const WorkOrders = () => {
     const minutes = parseInt(createForm.estimatedMinutes || '0', 10);
     const estimatedDuration = (Number.isFinite(hours) ? hours : 0) * 60 + (Number.isFinite(minutes) ? minutes : 0);
 
+    const recurrenceIntervalWeeks = Math.max(1, parseInt(String(createForm.recurrenceIntervalWeeks || 1), 10) || 1);
+    const recurrenceIntervalMonths = Math.max(1, parseInt(String(createForm.recurrenceIntervalMonths || 1), 10) || 1);
+    const recurrenceDayOfMonth = Math.min(31, Math.max(1, parseInt(String(createForm.recurrenceDayOfMonth || 1), 10) || 1));
+    const recurrenceWeekOfMonth = Math.min(5, Math.max(1, parseInt(String(createForm.recurrenceWeekOfMonth || 1), 10) || 1));
+    const recurrenceWeekday = String(createForm.recurrenceWeekday || 'mon');
+    const recurrenceIntervalYears = Math.max(1, parseInt(String(createForm.recurrenceIntervalYears || 1), 10) || 1);
+
+    const yearlyBaseDate = createForm.startDate ? new Date(createForm.startDate) : new Date();
+    const recurrenceYearlyMonth = yearlyBaseDate.getMonth() + 1;
+    const recurrenceYearlyDay = yearlyBaseDate.getDate();
+
     const created = addWorkOrder({
       title,
       description: createForm.description.trim(),
@@ -511,6 +536,15 @@ const WorkOrders = () => {
       startDate: createForm.startDate ? new Date(createForm.startDate).toISOString() : undefined,
       estimatedDuration: estimatedDuration || undefined,
       recurrence: createForm.recurrence,
+      recurrenceIntervalWeeks: createForm.recurrence === 'weekly' ? recurrenceIntervalWeeks : undefined,
+      recurrenceDays: (createForm.recurrence === 'daily' || createForm.recurrence === 'weekly') ? (createForm.recurrenceDays || []) : undefined,
+      recurrenceIntervalMonths: (createForm.recurrence === 'monthly_by_date' || createForm.recurrence === 'monthly_by_weekday') ? recurrenceIntervalMonths : undefined,
+      recurrenceDayOfMonth: createForm.recurrence === 'monthly_by_date' ? recurrenceDayOfMonth : undefined,
+      recurrenceWeekOfMonth: createForm.recurrence === 'monthly_by_weekday' ? recurrenceWeekOfMonth : undefined,
+      recurrenceWeekday: createForm.recurrence === 'monthly_by_weekday' ? recurrenceWeekday : undefined,
+      recurrenceIntervalYears: createForm.recurrence === 'yearly' ? recurrenceIntervalYears : undefined,
+      recurrenceYearlyMonth: createForm.recurrence === 'yearly' ? recurrenceYearlyMonth : undefined,
+      recurrenceYearlyDay: createForm.recurrence === 'yearly' ? recurrenceYearlyDay : undefined,
       workType: createForm.workType,
       attachments: createForm.attachments || [],
     });
@@ -1388,16 +1422,270 @@ const WorkOrders = () => {
               <label className="block text-sm font-medium text-gray-700 mb-1">Recurrence</label>
               <select
                 value={createForm.recurrence}
-                onChange={(e) => setCreateForm((p) => ({ ...p, recurrence: e.target.value }))}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setCreateForm((p) => ({
+                    ...p,
+                    recurrence: next,
+                    recurrenceDays:
+                      next === 'daily' || next === 'weekly'
+                        ? ((p.recurrenceDays && p.recurrenceDays.length > 0) ? p.recurrenceDays : ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'])
+                        : p.recurrenceDays,
+                    recurrenceIntervalWeeks: next === 'weekly' ? (p.recurrenceIntervalWeeks || 1) : p.recurrenceIntervalWeeks,
+                    recurrenceIntervalMonths: (next === 'monthly_by_date' || next === 'monthly_by_weekday') ? (p.recurrenceIntervalMonths || 1) : p.recurrenceIntervalMonths,
+                    recurrenceDayOfMonth: next === 'monthly_by_date' ? (p.recurrenceDayOfMonth || new Date().getDate()) : p.recurrenceDayOfMonth,
+                    recurrenceWeekOfMonth: next === 'monthly_by_weekday' ? (p.recurrenceWeekOfMonth || 1) : p.recurrenceWeekOfMonth,
+                    recurrenceWeekday: next === 'monthly_by_weekday' ? (p.recurrenceWeekday || 'mon') : p.recurrenceWeekday,
+                    recurrenceIntervalYears: next === 'yearly' ? (p.recurrenceIntervalYears || 1) : p.recurrenceIntervalYears,
+                  }));
+                }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
               >
                 <option value="does_not_repeat">Does not repeat</option>
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
+                <option value="monthly_by_date">Monthly by date</option>
+                <option value="monthly_by_weekday">Monthly by weekday</option>
                 <option value="quarterly">Quarterly</option>
                 <option value="yearly">Yearly</option>
               </select>
+
+              {createForm.recurrence === 'daily' && (
+                <div className="mt-3">
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { key: 'sun', label: 'Sun' },
+                      { key: 'mon', label: 'Mon' },
+                      { key: 'tue', label: 'Tue' },
+                      { key: 'wed', label: 'Wed' },
+                      { key: 'thu', label: 'Thu' },
+                      { key: 'fri', label: 'Fri' },
+                      { key: 'sat', label: 'Sat' },
+                    ].map((d) => {
+                      const selected = (createForm.recurrenceDays || []).includes(d.key);
+                      return (
+                        <button
+                          key={d.key}
+                          type="button"
+                          onClick={() => {
+                            setCreateForm((p) => {
+                              const current = Array.isArray(p.recurrenceDays) ? p.recurrenceDays : [];
+                              const next = current.includes(d.key) ? current.filter((x) => x !== d.key) : [...current, d.key];
+                              return { ...p, recurrenceDays: next };
+                            });
+                          }}
+                          className={`h-9 w-11 rounded-full text-sm font-medium border transition-colors ${selected ? 'bg-primary-600 border-primary-600 text-white' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                        >
+                          {d.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-2 text-xs text-gray-500">Repeats every day after completion of this Work Order.</div>
+                </div>
+              )}
+
+              {createForm.recurrence === 'weekly' && (
+                <div className="mt-3">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+                    <span>Every</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={createForm.recurrenceIntervalWeeks}
+                      onChange={(e) => setCreateForm((p) => ({ ...p, recurrenceIntervalWeeks: e.target.value }))}
+                      className="w-16 px-2 py-1.5 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                    />
+                    <span>week on</span>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {[
+                      { key: 'sun', label: 'Sun', full: 'Sunday' },
+                      { key: 'mon', label: 'Mon', full: 'Monday' },
+                      { key: 'tue', label: 'Tue', full: 'Tuesday' },
+                      { key: 'wed', label: 'Wed', full: 'Wednesday' },
+                      { key: 'thu', label: 'Thu', full: 'Thursday' },
+                      { key: 'fri', label: 'Fri', full: 'Friday' },
+                      { key: 'sat', label: 'Sat', full: 'Saturday' },
+                    ].map((d) => {
+                      const selected = (createForm.recurrenceDays || []).includes(d.key);
+                      return (
+                        <button
+                          key={d.key}
+                          type="button"
+                          onClick={() => {
+                            setCreateForm((p) => {
+                              const current = Array.isArray(p.recurrenceDays) ? p.recurrenceDays : [];
+                              const next = current.includes(d.key) ? current.filter((x) => x !== d.key) : [...current, d.key];
+                              return { ...p, recurrenceDays: next };
+                            });
+                          }}
+                          className={`h-9 w-11 rounded-full text-sm font-medium border transition-colors ${selected ? 'bg-primary-600 border-primary-600 text-white' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                        >
+                          {d.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-2 text-xs text-gray-500">
+                    {(() => {
+                      const order = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+                      const map = {
+                        sun: 'Sunday',
+                        mon: 'Monday',
+                        tue: 'Tuesday',
+                        wed: 'Wednesday',
+                        thu: 'Thursday',
+                        fri: 'Friday',
+                        sat: 'Saturday',
+                      };
+                      const days = order.filter((k) => (createForm.recurrenceDays || []).includes(k)).map((k) => map[k]);
+                      const interval = Math.max(1, parseInt(String(createForm.recurrenceIntervalWeeks || 1), 10) || 1);
+                      const intervalText = interval === 1 ? 'every week' : `every ${interval} weeks`;
+                      const dayText = days.length > 0 ? days.join(', ') : 'no days selected';
+                      return `Repeats ${intervalText} on ${dayText} after completion of this Work Order.`;
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {createForm.recurrence === 'monthly_by_date' && (
+                <div className="mt-3">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+                    <span>Every</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={createForm.recurrenceIntervalMonths}
+                      onChange={(e) => setCreateForm((p) => ({ ...p, recurrenceIntervalMonths: e.target.value }))}
+                      className="w-16 px-2 py-1.5 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                    />
+                    <span>month on the</span>
+                    <select
+                      value={createForm.recurrenceDayOfMonth}
+                      onChange={(e) => setCreateForm((p) => ({ ...p, recurrenceDayOfMonth: e.target.value }))}
+                      className="px-2 py-1.5 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                    >
+                      {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="mt-2 text-xs text-gray-500">
+                    {(() => {
+                      const day = Math.min(31, Math.max(1, parseInt(String(createForm.recurrenceDayOfMonth || 1), 10) || 1));
+                      const interval = Math.max(1, parseInt(String(createForm.recurrenceIntervalMonths || 1), 10) || 1);
+                      const suffix = (n) => {
+                        const mod100 = n % 100;
+                        if (mod100 >= 11 && mod100 <= 13) return 'th';
+                        switch (n % 10) {
+                          case 1: return 'st';
+                          case 2: return 'nd';
+                          case 3: return 'rd';
+                          default: return 'th';
+                        }
+                      };
+                      const ordinal = `${day}${suffix(day)}`;
+                      const intervalText = interval === 1 ? 'every month' : `every ${interval} months`;
+                      return `Repeats ${intervalText} on the ${ordinal} day of the month after completion of this Work Order.`;
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {createForm.recurrence === 'monthly_by_weekday' && (
+                <div className="mt-3">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+                    <span>Every</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={createForm.recurrenceIntervalMonths}
+                      onChange={(e) => setCreateForm((p) => ({ ...p, recurrenceIntervalMonths: e.target.value }))}
+                      className="w-16 px-2 py-1.5 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                    />
+                    <span>month on the</span>
+                    <select
+                      value={createForm.recurrenceWeekOfMonth}
+                      onChange={(e) => setCreateForm((p) => ({ ...p, recurrenceWeekOfMonth: e.target.value }))}
+                      className="px-2 py-1.5 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                    >
+                      <option value={1}>1st</option>
+                      <option value={2}>2nd</option>
+                      <option value={3}>3rd</option>
+                      <option value={4}>4th</option>
+                      <option value={5}>Last</option>
+                    </select>
+                    <select
+                      value={createForm.recurrenceWeekday}
+                      onChange={(e) => setCreateForm((p) => ({ ...p, recurrenceWeekday: e.target.value }))}
+                      className="px-2 py-1.5 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                    >
+                      <option value="sun">Sunday</option>
+                      <option value="mon">Monday</option>
+                      <option value="tue">Tuesday</option>
+                      <option value="wed">Wednesday</option>
+                      <option value="thu">Thursday</option>
+                      <option value="fri">Friday</option>
+                      <option value="sat">Saturday</option>
+                    </select>
+                  </div>
+
+                  <div className="mt-2 text-xs text-gray-500">
+                    {(() => {
+                      const interval = Math.max(1, parseInt(String(createForm.recurrenceIntervalMonths || 1), 10) || 1);
+                      const intervalText = interval === 1 ? 'every month' : `every ${interval} months`;
+
+                      const week = Math.min(5, Math.max(1, parseInt(String(createForm.recurrenceWeekOfMonth || 1), 10) || 1));
+                      const weekText = week === 5 ? 'last' : (week === 1 ? '1st' : (week === 2 ? '2nd' : (week === 3 ? '3rd' : '4th')));
+
+                      const weekdayMap = {
+                        sun: 'Sunday',
+                        mon: 'Monday',
+                        tue: 'Tuesday',
+                        wed: 'Wednesday',
+                        thu: 'Thursday',
+                        fri: 'Friday',
+                        sat: 'Saturday',
+                      };
+                      const weekdayKey = String(createForm.recurrenceWeekday || 'mon');
+                      const weekday = weekdayMap[weekdayKey] || 'Monday';
+
+                      return `Repeats ${intervalText} on the ${weekText} ${weekday} of the month after completion of this Work Order.`;
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {createForm.recurrence === 'yearly' && (
+                <div className="mt-3">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+                    <span>Every</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={createForm.recurrenceIntervalYears}
+                      onChange={(e) => setCreateForm((p) => ({ ...p, recurrenceIntervalYears: e.target.value }))}
+                      className="w-16 px-2 py-1.5 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                    />
+                    <span>year</span>
+                  </div>
+
+                  <div className="mt-2 text-xs text-gray-500">
+                    {(() => {
+                      const interval = Math.max(1, parseInt(String(createForm.recurrenceIntervalYears || 1), 10) || 1);
+                      const intervalText = interval === 1 ? 'every year' : `every ${interval} years`;
+                      const base = createForm.startDate ? new Date(createForm.startDate) : new Date();
+                      const day = String(base.getDate()).padStart(2, '0');
+                      const month = String(base.getMonth() + 1).padStart(2, '0');
+                      return `Repeats ${intervalText} on ${day}/${month} after completion of this Work Order.`;
+                    })()}
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Work Type</label>

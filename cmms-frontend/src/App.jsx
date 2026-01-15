@@ -3,8 +3,6 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import Layout from './components/Layout/Layout';
 import WorkOrders from './pages/WorkOrders';
 import Assets from './pages/Assets';
-import PreventiveMaintenance from './pages/PreventiveMaintenance';
-import Inventory from './pages/Inventory';
 import Locations from './pages/Locations';
 import Settings from './pages/Settings';
 import Requests from './pages/Requests.jsx';
@@ -44,8 +42,6 @@ function App() {
           <Route path="/meters" element={<Meters />} />
           <Route path="/automations" element={<Automations />} />
           <Route path="/automations/create" element={<AutomationCreate />} />
-          <Route path="/pm" element={<PreventiveMaintenance />} />
-          <Route path="/inventory" element={<Inventory />} />
           <Route path="/locations" element={<Locations />} />
           <Route path="/locations/create" element={<LocationCreate />} />
           <Route path="/teams-users" element={<TeamsUsers />} />
