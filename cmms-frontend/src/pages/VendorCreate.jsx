@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Camera, Paperclip, Plus } from 'lucide-react';
 import axios from 'axios';
 import { Button } from '../components';
@@ -20,10 +20,14 @@ const COLORS = [
 
 const VendorCreate = () => {
   const navigate = useNavigate();
+  const params = useParams();
+  const vendorId = params?.id;
+  const isEdit = Boolean(vendorId);
   const { locations, assets, inventory } = useStore();
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -46,12 +50,60 @@ const VendorCreate = () => {
     setFormData((p) => ({ ...p, [name]: value }));
   };
 
+  const updateContact = (id, patch) => {
+    setContacts((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  };
+
+  const removeContact = (id) => {
+    setContacts((prev) => prev.filter((c) => c.id !== id));
+  };
+
   const addContact = () => {
     setContacts((prev) => [
       ...prev,
       { id: `c${Date.now()}`, name: '', email: '', phone: '' },
     ]);
   };
+
+  useEffect(() => {
+    if (!isEdit) return;
+    const run = async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const res = await axios.get(`${API_BASE_URL}/vendors/${vendorId}`, {
+          headers: { accept: 'application/json' },
+        });
+        const v = res?.data || {};
+        setFormData((p) => ({
+          ...p,
+          name: v?.name ?? '',
+          color: v?.color ?? p.color,
+          description: v?.description ?? '',
+          locations: v?.locations ?? v?.location_id ?? '',
+          assets: v?.assets ?? v?.asset_id ?? '',
+          parts: v?.parts ?? v?.part_id ?? '',
+          vendorTypes: v?.vendorTypes ?? v?.vendor_types ?? '',
+        }));
+
+        const apiContacts = v?.contacts;
+        if (Array.isArray(apiContacts)) {
+          setContacts(apiContacts.map((c) => ({
+            id: c?.id ? String(c.id) : `c${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            name: c?.name ?? '',
+            email: c?.email ?? '',
+            phone: c?.phone ?? '',
+          })));
+        }
+      } catch (e) {
+        setError(e?.response?.data?.detail || e?.message || 'Failed to load vendor');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    run();
+  }, [isEdit, vendorId]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -61,19 +113,65 @@ const VendorCreate = () => {
     setSaving(true);
     setError('');
     try {
-      await axios.post(
-        `${API_BASE_URL}/vendors`,
-        { name },
-        {
-          headers: {
-            accept: 'application/json',
-            'Content-Type': 'application/json',
+      const payload = {
+        name,
+        color: formData.color,
+        description: formData.description,
+        locations: formData.locations,
+        location_id: formData.locations || null,
+        assets: formData.assets,
+        asset_id: formData.assets || null,
+        parts: formData.parts,
+        part_id: formData.parts || null,
+        vendorTypes: formData.vendorTypes,
+        vendor_types: formData.vendorTypes,
+        contacts,
+      };
+
+      if (isEdit) {
+        try {
+          await axios.patch(
+            `${API_BASE_URL}/vendors/${vendorId}`,
+            payload,
+            {
+              headers: {
+                accept: 'application/json',
+                'Content-Type': 'application/json',
+              },
+            },
+          );
+        } catch (ePatch) {
+          const status = ePatch?.response?.status;
+          if (status === 422 || status === 400) {
+            await axios.patch(
+              `${API_BASE_URL}/vendors/${vendorId}`,
+              { name },
+              {
+                headers: {
+                  accept: 'application/json',
+                  'Content-Type': 'application/json',
+                },
+              },
+            );
+          } else {
+            throw ePatch;
+          }
+        }
+      } else {
+        await axios.post(
+          `${API_BASE_URL}/vendors`,
+          payload,
+          {
+            headers: {
+              accept: 'application/json',
+              'Content-Type': 'application/json',
+            },
           },
-        },
-      );
+        );
+      }
       navigate('/vendors');
     } catch (e2) {
-      setError(e2?.response?.data?.detail || e2?.message || 'Failed to create vendor');
+      setError(e2?.response?.data?.detail || e2?.message || (isEdit ? 'Failed to update vendor' : 'Failed to create vendor'));
     } finally {
       setSaving(false);
     }
@@ -82,10 +180,13 @@ const VendorCreate = () => {
   return (
     <div className="max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-semibold text-gray-900">New Vendor</h1>
+        <h1 className="text-xl font-semibold text-gray-900">{isEdit ? 'Edit Vendor' : 'New Vendor'}</h1>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-8">
+        {loading ? (
+          <div className="p-3 rounded-md border border-gray-200 bg-gray-50 text-gray-700 text-sm">Loading…</div>
+        ) : null}
         {error ? (
           <div className="p-3 rounded-md border border-red-200 bg-red-50 text-red-700 text-sm">
             {error}
@@ -163,18 +264,33 @@ const VendorCreate = () => {
                   <input
                     type="text"
                     placeholder="Name"
+                    value={c.name}
+                    onChange={(e) => updateContact(c.id, { name: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                   />
                   <input
                     type="email"
                     placeholder="Email"
+                    value={c.email}
+                    onChange={(e) => updateContact(c.id, { email: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                   />
                   <input
                     type="tel"
                     placeholder="Phone"
+                    value={c.phone}
+                    onChange={(e) => updateContact(c.id, { phone: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                   />
+                  <div className="md:col-span-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => removeContact(c.id)}
+                      className="text-sm text-red-600 hover:text-red-700 font-medium"
+                    >
+                      Remove contact
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -266,7 +382,7 @@ const VendorCreate = () => {
           >
             Cancel
           </button>
-          <Button type="submit" disabled={saving}>{saving ? 'Creating…' : 'Create'}</Button>
+          <Button type="submit" disabled={saving || loading}>{saving ? (isEdit ? 'Saving…' : 'Creating…') : (isEdit ? 'Save' : 'Create')}</Button>
         </div>
       </form>
     </div>

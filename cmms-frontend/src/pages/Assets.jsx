@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Filter, Search, Power, Wrench, CheckCircle, Upload, Paperclip, QrCode, ChevronDown, X } from 'lucide-react';
+import { Plus, Filter, Search, Power, Wrench, CheckCircle, QrCode, ChevronDown } from 'lucide-react';
 import axios from 'axios';
 import { Card, CardHeader, CardBody, Button, Badge, Table, Modal } from '../components';
 import useStore from '../store/useStore';
@@ -18,17 +18,13 @@ const Assets = () => {
   const assetHealthEvents = [];
   const updateAssetStatus = () => {};
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [assetModalMode, setAssetModalMode] = useState('create');
+  const [editingAssetId, setEditingAssetId] = useState(null);
   const [selectedAsset, setSelectedAsset] = useState(null);
-  const pictureInputRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const [isDraggingPictures, setIsDraggingPictures] = useState(false);
-  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [barcodeManual, setBarcodeManual] = useState(false);
 
   const [createForm, setCreateForm] = useState({
     name: '',
-    pictures: [],
-    files: [],
     locationId: '',
     criticality: '',
     description: '',
@@ -235,7 +231,7 @@ const Assets = () => {
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              handleRenameAsset(row);
+              handleEditAsset(row);
             }}
             className="text-sm text-primary-600 hover:text-primary-700 font-medium"
           >
@@ -270,8 +266,6 @@ const Assets = () => {
     setBarcodeManual(false);
     setCreateForm({
       name: '',
-      pictures: [],
-      files: [],
       locationId: '',
       criticality: '',
       description: '',
@@ -288,71 +282,35 @@ const Assets = () => {
     });
   };
 
-  const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-
-  const addPictures = async (fileList) => {
-    const files = Array.from(fileList || []);
-    if (files.length === 0) return;
-
-    const mapped = await Promise.all(
-      files.map(async (file) => {
-        const dataUrl = await readFileAsDataUrl(file);
-        return {
-          id: `PIC-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          dataUrl,
-        };
-      })
-    );
-
-    setCreateForm((prev) => ({
-      ...prev,
-      pictures: [...(prev.pictures || []), ...mapped],
-    }));
+  const openCreateAssetModal = () => {
+    setAssetModalMode('create');
+    setEditingAssetId(null);
+    resetCreateForm();
+    setShowCreateModal(true);
   };
 
-  const addFiles = async (fileList) => {
-    const files = Array.from(fileList || []);
-    if (files.length === 0) return;
-
-    const mapped = await Promise.all(
-      files.map(async (file) => {
-        const dataUrl = await readFileAsDataUrl(file);
-        return {
-          id: `FILE-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          dataUrl,
-        };
-      })
-    );
-
-    setCreateForm((prev) => ({
-      ...prev,
-      files: [...(prev.files || []), ...mapped],
-    }));
-  };
-
-  const removePicture = (id) => {
-    setCreateForm((prev) => ({
-      ...prev,
-      pictures: (prev.pictures || []).filter((p) => p.id !== id),
-    }));
-  };
-
-  const removeFile = (id) => {
-    setCreateForm((prev) => ({
-      ...prev,
-      files: (prev.files || []).filter((f) => f.id !== id),
-    }));
+  const openEditAssetModal = (asset) => {
+    if (!asset) return;
+    setAssetModalMode('edit');
+    setEditingAssetId(asset.id);
+    setBarcodeManual(false);
+    setCreateForm({
+      name: asset.name || '',
+      locationId: asset.locationId ? String(asset.locationId) : '',
+      criticality: asset.criticality ? String(asset.criticality) : '',
+      description: asset.description ? String(asset.description) : '',
+      year: asset.year ? String(asset.year) : '',
+      manufacturer: asset.manufacturer ? String(asset.manufacturer) : '',
+      model: asset.model ? String(asset.model) : '',
+      serialNumber: asset.serialNumber ? String(asset.serialNumber) : '',
+      teamsInCharge: asset.teamsInCharge ? String(asset.teamsInCharge) : '',
+      barcode: asset.barcode ? String(asset.barcode) : generateBarcode(),
+      assetType: asset.assetType ? String(asset.assetType) : '',
+      vendorId: asset.vendorId ? String(asset.vendorId) : '',
+      parts: asset.parts ? String(asset.parts) : '',
+      parentAssetId: asset.parentAssetId ? String(asset.parentAssetId) : '',
+    });
+    setShowCreateModal(true);
   };
 
   const handleCreateAsset = async () => {
@@ -366,32 +324,47 @@ const Assets = () => {
     setSaving(true);
     setError('');
     try {
-      await axios.post(
-        `${API_BASE_URL}/assets`,
-        {
-          asset_name: assetName,
-          location: location === 'Unknown Location' ? '' : location,
-          criticality: String(createForm.criticality || ''),
-          description: String(createForm.description || ''),
-          manufacturer: String(createForm.manufacturer || ''),
-          model: String(createForm.model || ''),
-          model_serial_no: String(createForm.serialNumber || ''),
-          year,
-          asset_type: String(createForm.assetType || ''),
-          vendor_id: vendorId,
-        },
-        {
-          headers: {
-            accept: 'application/json',
-            'Content-Type': 'application/json',
+      const payload = {
+        asset_name: assetName,
+        location: location === 'Unknown Location' ? '' : location,
+        criticality: String(createForm.criticality || ''),
+        description: String(createForm.description || ''),
+        manufacturer: String(createForm.manufacturer || ''),
+        model: String(createForm.model || ''),
+        model_serial_no: String(createForm.serialNumber || ''),
+        year,
+        asset_type: String(createForm.assetType || ''),
+        vendor_id: vendorId,
+      };
+
+      if (assetModalMode === 'edit' && editingAssetId) {
+        await axios.patch(
+          `${API_BASE_URL}/assets/${editingAssetId}`,
+          payload,
+          {
+            headers: {
+              accept: 'application/json',
+              'Content-Type': 'application/json',
+            },
           },
-        },
-      );
+        );
+      } else {
+        await axios.post(
+          `${API_BASE_URL}/assets`,
+          payload,
+          {
+            headers: {
+              accept: 'application/json',
+              'Content-Type': 'application/json',
+            },
+          },
+        );
+      }
       setShowCreateModal(false);
       resetCreateForm();
       await fetchAssets();
     } catch (e) {
-      setError(e?.response?.data?.detail || e?.message || 'Failed to create asset');
+      setError(e?.response?.data?.detail || e?.message || (assetModalMode === 'edit' ? 'Failed to update asset' : 'Failed to create asset'));
     } finally {
       setSaving(false);
     }
@@ -412,38 +385,8 @@ const Assets = () => {
     }
   };
 
-  const handleRenameAsset = async (asset) => {
-    const nextName = window.prompt('Asset name', asset?.name || '');
-    if (nextName === null) return;
-    const trimmed = String(nextName).trim();
-    if (!trimmed) return;
-    setError('');
-    try {
-      await axios.patch(
-        `${API_BASE_URL}/assets/${asset.id}`,
-        {
-          asset_name: trimmed,
-          location: String(asset.locationId || ''),
-          criticality: String(asset.criticality || ''),
-          description: String(asset.description || ''),
-          manufacturer: String(asset.manufacturer || ''),
-          model: String(asset.model || ''),
-          model_serial_no: String(asset.serialNumber || ''),
-          year: asset.year || new Date().getFullYear(),
-          asset_type: String(asset.assetType || ''),
-          vendor_id: asset.vendorId,
-        },
-        {
-          headers: {
-            accept: 'application/json',
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-      await fetchAssets();
-    } catch (e) {
-      setError(e?.response?.data?.detail || e?.message || 'Failed to update asset');
-    }
+  const handleEditAsset = (asset) => {
+    openEditAssetModal(asset);
   };
 
   return (
@@ -454,7 +397,7 @@ const Assets = () => {
           <h1 className="text-2xl font-bold text-gray-900">Assets</h1>
           <p className="text-gray-600 mt-1">Manage and monitor all physical assets</p>
         </div>
-        <Button onClick={() => { resetCreateForm(); setShowCreateModal(true); }}>
+        <Button onClick={openCreateAssetModal}>
           <Plus className="w-4 h-4 mr-2" />
           Add Asset
         </Button>
@@ -690,8 +633,8 @@ const Assets = () => {
       {/* Create Asset Modal */}
       <Modal
         isOpen={showCreateModal}
-        onClose={() => { setShowCreateModal(false); resetCreateForm(); }}
-        title="New Asset"
+        onClose={() => { setShowCreateModal(false); resetCreateForm(); setAssetModalMode('create'); setEditingAssetId(null); }}
+        title={assetModalMode === 'edit' ? 'Edit Asset' : 'New Asset'}
         size="xl"
       >
         <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-1">
@@ -705,122 +648,6 @@ const Assets = () => {
             />
           </div>
 
-          <div>
-            <div className="text-sm font-medium text-gray-700 mb-2">Pictures</div>
-            <input
-              ref={pictureInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                addPictures(e.target.files);
-                e.target.value = '';
-              }}
-            />
-            <div
-              className={`w-full rounded-md border-2 border-dashed p-6 transition-colors ${isDraggingPictures ? 'border-primary-500 bg-primary-50' : 'border-gray-300 bg-gray-50'}`}
-              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingPictures(true); }}
-              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingPictures(true); }}
-              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingPictures(false); }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setIsDraggingPictures(false);
-                addPictures(e.dataTransfer.files);
-              }}
-            >
-              <div className="flex flex-col items-center text-center gap-2">
-                <div className="h-10 w-10 rounded-full bg-white border border-gray-200 flex items-center justify-center">
-                  <Upload className="h-5 w-5 text-gray-500" />
-                </div>
-                <button
-                  type="button"
-                  className="text-sm font-medium text-primary-600 hover:text-primary-700"
-                  onClick={() => pictureInputRef.current?.click()}
-                >
-                  Add or drag pictures
-                </button>
-                <div className="text-xs text-gray-500">PNG, JPG, GIF</div>
-              </div>
-            </div>
-
-            {createForm.pictures && createForm.pictures.length > 0 && (
-              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
-                {createForm.pictures.map((p) => (
-                  <div key={p.id} className="relative border border-gray-200 rounded-md overflow-hidden bg-white">
-                    <button
-                      type="button"
-                      onClick={() => removePicture(p.id)}
-                      className="absolute top-1 right-1 h-7 w-7 rounded-full bg-white/90 border border-gray-200 flex items-center justify-center hover:bg-white"
-                      aria-label="Remove"
-                      title="Remove"
-                    >
-                      <X className="h-4 w-4 text-gray-600" />
-                    </button>
-                    <img src={p.dataUrl} alt={p.name} className="h-24 w-full object-cover" />
-                    <div className="px-2 py-1 text-xs text-gray-700 truncate" title={p.name}>{p.name}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <div className="text-sm font-medium text-gray-700 mb-2">Files</div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                addFiles(e.target.files);
-                e.target.value = '';
-              }}
-            />
-            <div
-              className={`w-full rounded-md border-2 border-dashed p-6 transition-colors ${isDraggingFiles ? 'border-primary-500 bg-primary-50' : 'border-gray-300 bg-gray-50'}`}
-              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingFiles(true); }}
-              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingFiles(true); }}
-              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingFiles(false); }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setIsDraggingFiles(false);
-                addFiles(e.dataTransfer.files);
-              }}
-            >
-              <div className="flex flex-col items-center text-center gap-2">
-                <div className="h-10 w-10 rounded-full bg-white border border-gray-200 flex items-center justify-center">
-                  <Paperclip className="h-5 w-5 text-gray-500" />
-                </div>
-                <button
-                  type="button"
-                  className="text-sm font-medium text-primary-600 hover:text-primary-700"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  Add or drag files
-                </button>
-                <div className="text-xs text-gray-500">Any file type</div>
-              </div>
-            </div>
-
-            {createForm.files && createForm.files.length > 0 && (
-              <div className="mt-3 space-y-2">
-                {createForm.files.map((f) => (
-                  <div key={f.id} className="flex items-center justify-between border border-gray-200 rounded-md px-3 py-2 bg-white">
-                    <div className="min-w-0">
-                      <div className="text-sm text-gray-900 truncate" title={f.name}>{f.name}</div>
-                      <div className="text-xs text-gray-500">{Math.round((f.size || 0) / 1024)} KB</div>
-                    </div>
-                    <button type="button" onClick={() => removeFile(f.id)} className="h-8 w-8 rounded-md border border-gray-200 flex items-center justify-center hover:bg-gray-50" title="Remove">
-                      <X className="h-4 w-4 text-gray-600" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -1050,8 +877,8 @@ const Assets = () => {
             <Button variant="secondary" onClick={() => { setShowCreateModal(false); resetCreateForm(); }}>
               Cancel
             </Button>
-            <Button onClick={handleCreateAsset} disabled={!createForm.name.trim() || saving}>
-              {saving ? 'Creating…' : 'Create'}
+            <Button onClick={handleCreateAsset} disabled={!createForm.name.trim() || saving || (assetModalMode === 'edit' && !editingAssetId)}>
+              {saving ? (assetModalMode === 'edit' ? 'Saving…' : 'Creating…') : (assetModalMode === 'edit' ? 'Save' : 'Create')}
             </Button>
           </div>
         </div>
@@ -1070,7 +897,7 @@ const Assets = () => {
             <div className="flex items-center justify-between">
               {getStatusBadge(selectedAsset.status)}
               <div className="flex space-x-2">
-                <Button variant="secondary" onClick={() => handleRenameAsset(selectedAsset)}>
+                <Button variant="secondary" onClick={() => { setSelectedAsset(null); openEditAssetModal(selectedAsset); }}>
                   Edit
                 </Button>
                 <Button variant="secondary" onClick={() => handleDeleteAsset(selectedAsset.id)}>

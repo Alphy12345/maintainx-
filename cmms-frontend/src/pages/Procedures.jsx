@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { CheckCircle2, ChevronDown, Filter, Plus, Search } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Filter, Plus, Search, Trash2, Type, Rows3, SquarePen, Hash, DollarSign, List, ListChecks, ScanSearch, CheckSquare, X } from 'lucide-react';
 import axios from 'axios';
 import { Button, Card, Modal } from '../components';
 
@@ -21,6 +21,61 @@ const Procedures = () => {
   const [showModal, setShowModal] = useState(false);
   const [mode, setMode] = useState('create');
   const [form, setForm] = useState({ name: '', description: '', asset_id: '', sections: [] });
+
+  const [typeMenuOpenForId, setTypeMenuOpenForId] = useState(null);
+  const [typeSearch, setTypeSearch] = useState('');
+
+  const newItemId = () => `it-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  const fieldTypeOptions = [
+    { key: 'checkbox', label: 'Checkbox', Icon: CheckSquare },
+    { key: 'text', label: 'Text Field', Icon: Rows3 },
+    { key: 'number', label: 'Number Field', Icon: Hash },
+    { key: 'amount', label: 'Amount ($)', Icon: DollarSign },
+    { key: 'multiple_choice', label: 'Multiple Choice', Icon: List },
+    { key: 'checklist', label: 'Checklist', Icon: ListChecks },
+    { key: 'inspection_check', label: 'Inspection Check', Icon: ScanSearch },
+  ];
+
+  const ensureOptionsIfNeeded = (it) => {
+    const ft = String(it?.field_type || 'text');
+    if (ft === 'multiple_choice' || ft === 'checklist') {
+      const options = Array.isArray(it?.options) ? it.options : [];
+      return { ...it, options: options.length ? options : ['Option 1'] };
+    }
+    return { ...it, options: Array.isArray(it?.options) ? it.options : [] };
+  };
+
+  const normalizeItems = (items) => {
+    const list = Array.isArray(items) ? items : [];
+    return list.map((it) => {
+      const type = String(it?.type || it?.kind || 'field');
+      if (type === 'heading') {
+        return {
+          id: it?.id || newItemId(),
+          type: 'heading',
+          text: it?.text ?? it?.title ?? '',
+        };
+      }
+      if (type === 'section') {
+        return {
+          id: it?.id || newItemId(),
+          type: 'section',
+          title: it?.title ?? it?.text ?? '',
+        };
+      }
+      return {
+        id: it?.id || newItemId(),
+        type: 'field',
+        label: it?.label ?? it?.name ?? it?.field_name ?? '',
+        field_type: it?.field_type ?? it?.input_type ?? 'text',
+        required: Boolean(it?.required),
+        options: Array.isArray(it?.options)
+          ? it.options
+          : (Array.isArray(it?.choices) ? it.choices : (Array.isArray(it?.items) ? it.items : [])),
+      };
+    });
+  };
 
   const assetsById = useMemo(() => {
     const map = new Map();
@@ -88,9 +143,77 @@ const Procedures = () => {
       name: proc?.name ?? '',
       description: proc?.description ?? '',
       asset_id: proc?.asset_id ? String(proc.asset_id) : '',
-      sections: Array.isArray(proc?.sections) ? proc.sections : [],
+      sections: normalizeItems(proc?.sections),
     });
     setShowModal(true);
+  };
+
+  const addBuilderItem = (type) => {
+    setForm((p) => {
+      const next = Array.isArray(p.sections) ? [...p.sections] : [];
+      if (type === 'heading') {
+        next.push({ id: newItemId(), type: 'heading', text: '' });
+      } else if (type === 'section') {
+        next.push({ id: newItemId(), type: 'section', title: '' });
+      } else {
+        next.push({ id: newItemId(), type: 'field', label: '', field_type: 'text', required: false, options: [] });
+      }
+      return { ...p, sections: next };
+    });
+  };
+
+  const updateBuilderItem = (id, patch) => {
+    setForm((p) => ({
+      ...p,
+      sections: (Array.isArray(p.sections) ? p.sections : []).map((it) => {
+        if (it?.id !== id) return it;
+        const next = { ...it, ...patch };
+        return it?.type === 'field' ? ensureOptionsIfNeeded(next) : next;
+      }),
+    }));
+  };
+
+  const addOption = (id) => {
+    setForm((p) => ({
+      ...p,
+      sections: (Array.isArray(p.sections) ? p.sections : []).map((it) => {
+        if (it?.id !== id) return it;
+        const existing = Array.isArray(it?.options) ? it.options : [];
+        const next = [...existing, `Option ${existing.length + 1}`];
+        return { ...it, options: next };
+      }),
+    }));
+  };
+
+  const updateOption = (id, idx, value) => {
+    setForm((p) => ({
+      ...p,
+      sections: (Array.isArray(p.sections) ? p.sections : []).map((it) => {
+        if (it?.id !== id) return it;
+        const existing = Array.isArray(it?.options) ? it.options : [];
+        const next = existing.map((o, i) => (i === idx ? value : o));
+        return { ...it, options: next };
+      }),
+    }));
+  };
+
+  const removeOption = (id, idx) => {
+    setForm((p) => ({
+      ...p,
+      sections: (Array.isArray(p.sections) ? p.sections : []).map((it) => {
+        if (it?.id !== id) return it;
+        const existing = Array.isArray(it?.options) ? it.options : [];
+        const next = existing.filter((_o, i) => i !== idx);
+        return { ...it, options: next.length ? next : ['Option 1'] };
+      }),
+    }));
+  };
+
+  const removeBuilderItem = (id) => {
+    setForm((p) => ({
+      ...p,
+      sections: (Array.isArray(p.sections) ? p.sections : []).filter((it) => it?.id !== id),
+    }));
   };
 
   const handleDelete = async (id) => {
@@ -138,6 +261,7 @@ const Procedures = () => {
             name: payload.name,
             description: payload.description,
             asset_id: payload.asset_id,
+            sections: payload.sections,
           },
           {
             headers: {
@@ -179,7 +303,7 @@ const Procedures = () => {
           </div>
           <Button onClick={openCreate}>
             <Plus className="w-4 h-4 mr-2" />
-            New Procedure Template
+            Add Procedure
             <ChevronDown className="w-4 h-4 ml-2" />
           </Button>
         </div>
@@ -288,7 +412,7 @@ const Procedures = () => {
         isOpen={showModal}
         onClose={() => setShowModal(false)}
         title={mode === 'create' ? 'New Procedure' : 'Edit Procedure'}
-        size="lg"
+        size="xl"
       >
         <div className="space-y-4">
           {error ? (
@@ -331,9 +455,270 @@ const Procedures = () => {
             </div>
           </div>
 
-          {mode === 'create' ? (
-            <div className="text-xs text-gray-500">Sections are currently sent as an empty array.</div>
-          ) : null}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            <div className="lg:col-span-9">
+              <div className="rounded-md border border-gray-200 bg-white p-4">
+                <div className="text-sm font-semibold text-gray-900">Procedure Builder</div>
+                <div className="mt-3 space-y-3">
+                  {(Array.isArray(form.sections) ? form.sections : []).length === 0 ? (
+                    <div className="text-sm text-gray-500">Add items from the right panel.</div>
+                  ) : null}
+
+                  {(Array.isArray(form.sections) ? form.sections : []).map((it) => (
+                    <div key={it.id} className="rounded-md border border-gray-200 p-3">
+                      {it.type === 'field' ? (
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <input
+                              value={it.label}
+                              onChange={(e) => updateBuilderItem(it.id, { label: e.target.value })}
+                              placeholder="Field Name"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                            />
+                            <div className="relative">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTypeMenuOpenForId((prev) => (prev === it.id ? null : it.id));
+                                  setTypeSearch('');
+                                }}
+                                className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-md bg-white focus:ring-primary-500 focus:border-primary-500"
+                              >
+                                <span className="inline-flex items-center gap-2 text-sm text-gray-700">
+                                  {(() => {
+                                    const cfg = fieldTypeOptions.find((x) => x.key === it.field_type) || fieldTypeOptions[1];
+                                    const Icon = cfg.Icon;
+                                    return (
+                                      <>
+                                        <Icon className="h-4 w-4 text-gray-500" />
+                                        {cfg.label}
+                                      </>
+                                    );
+                                  })()}
+                                </span>
+                                <ChevronDown className="h-4 w-4 text-gray-400" />
+                              </button>
+
+                              {typeMenuOpenForId === it.id && (
+                                <div className="absolute z-20 mt-2 w-full rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+                                  <div className="px-2 py-2 border-b border-gray-200">
+                                    <div className="relative">
+                                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                                      <input
+                                        value={typeSearch}
+                                        onChange={(e) => setTypeSearch(e.target.value)}
+                                        placeholder="Search"
+                                        className="w-full pl-8 pr-2 py-2 text-sm border border-gray-200 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="max-h-60 overflow-y-auto">
+                                    {fieldTypeOptions
+                                      .filter((x) => x.label.toLowerCase().includes(typeSearch.trim().toLowerCase()))
+                                      .map((x) => {
+                                        const Icon = x.Icon;
+                                        const active = x.key === it.field_type;
+                                        return (
+                                          <button
+                                            key={x.key}
+                                            type="button"
+                                            onClick={() => {
+                                              updateBuilderItem(it.id, { field_type: x.key });
+                                              setTypeMenuOpenForId(null);
+                                            }}
+                                            className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 inline-flex items-center gap-2 ${active ? 'bg-primary-50' : 'bg-white'}`}
+                                          >
+                                            <Icon className="h-4 w-4 text-gray-500" />
+                                            {x.label}
+                                          </button>
+                                        );
+                                      })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {it.field_type === 'text' && (
+                            <div>
+                              <textarea
+                                rows={3}
+                                disabled
+                                value=""
+                                placeholder="Text will be entered here"
+                                className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-sm"
+                              />
+                            </div>
+                          )}
+
+                          {it.field_type === 'number' && (
+                            <div>
+                              <input
+                                type="number"
+                                disabled
+                                value=""
+                                placeholder="Number will be entered here"
+                                className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-sm"
+                              />
+                            </div>
+                          )}
+
+                          {it.field_type === 'amount' && (
+                            <div className="flex items-center gap-2">
+                              <div className="text-sm text-gray-700">$</div>
+                              <input
+                                type="number"
+                                disabled
+                                value=""
+                                placeholder="Amount will be entered here"
+                                className="flex-1 px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-sm"
+                              />
+                            </div>
+                          )}
+
+                          {it.field_type === 'checkbox' && (
+                            <div className="flex items-center gap-2 text-sm text-gray-700">
+                              <input type="checkbox" disabled className="rounded border-gray-300" />
+                              Checkbox
+                            </div>
+                          )}
+
+                          {(it.field_type === 'multiple_choice' || it.field_type === 'checklist') && (
+                            <div className="space-y-2">
+                              {(Array.isArray(it.options) ? it.options : []).map((opt, idx) => (
+                                <div key={`${it.id}-opt-${idx}`} className="flex items-center gap-2">
+                                  <input
+                                    value={opt}
+                                    onChange={(e) => updateOption(it.id, idx, e.target.value)}
+                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-primary-500 focus:border-primary-500"
+                                    placeholder={`Option ${idx + 1}`}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => removeOption(it.id, idx)}
+                                    className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-gray-200 hover:bg-gray-50"
+                                    aria-label="Remove option"
+                                  >
+                                    <X className="h-4 w-4 text-gray-600" />
+                                  </button>
+                                </div>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() => addOption(it.id)}
+                                className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                              >
+                                + Add Option
+                              </button>
+                            </div>
+                          )}
+
+                          {it.field_type === 'inspection_check' && (
+                            <div className="grid grid-cols-3 gap-3">
+                              <button type="button" className="px-3 py-2 rounded-md border border-gray-200 bg-white text-sm text-green-600" disabled>Pass</button>
+                              <button type="button" className="px-3 py-2 rounded-md border border-gray-200 bg-white text-sm text-orange-600" disabled>Flag</button>
+                              <button type="button" className="px-3 py-2 rounded-md border border-gray-200 bg-white text-sm text-red-600" disabled>Fail</button>
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between">
+                            <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(it.required)}
+                                onChange={(e) => updateBuilderItem(it.id, { required: e.target.checked })}
+                                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                              />
+                              Required
+                            </label>
+
+                            <button
+                              type="button"
+                              onClick={() => removeBuilderItem(it.id)}
+                              className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {it.type === 'heading' ? (
+                        <div className="flex items-center gap-3">
+                          <input
+                            value={it.text}
+                            onChange={(e) => updateBuilderItem(it.id, { text: e.target.value })}
+                            placeholder="Heading"
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeBuilderItem(it.id)}
+                            className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Remove
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {it.type === 'section' ? (
+                        <div className="flex items-center gap-3">
+                          <input
+                            value={it.title}
+                            onChange={(e) => updateBuilderItem(it.id, { title: e.target.value })}
+                            placeholder="Section Title"
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeBuilderItem(it.id)}
+                            className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Remove
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="lg:col-span-3">
+              <div className="rounded-md border border-gray-200 bg-white p-4">
+                <div className="text-sm font-semibold text-gray-900">New Item</div>
+                <div className="mt-3 space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => addBuilderItem('field')}
+                    className="w-full inline-flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <SquarePen className="h-4 w-4 text-gray-500" />
+                    Field
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => addBuilderItem('heading')}
+                    className="w-full inline-flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <Type className="h-4 w-4 text-gray-500" />
+                    Heading
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => addBuilderItem('section')}
+                    className="w-full inline-flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <Rows3 className="h-4 w-4 text-gray-500" />
+                    Section
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
 
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>

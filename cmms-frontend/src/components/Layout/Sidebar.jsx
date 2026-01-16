@@ -1,22 +1,14 @@
-import React, { useMemo, useState } from 'react';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import React from 'react';
+import { NavLink } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   Wrench, 
   Package, 
-  MessageSquare,
   Tags,
   Boxes,
-  BookOpen,
-  ChevronDown,
-  MapPin, 
-  ClipboardList,
   BarChart3, 
-  Settings,
   Menu,
   X,
-  Gauge,
-  Zap,
   Users,
   Truck
 } from 'lucide-react';
@@ -25,35 +17,16 @@ import useStore from '../../store/useStore';
 const navigation = [
   { name: 'Work Orders', href: '/work-orders', icon: Wrench },
   { name: 'Reporting', href: '/reporting', icon: BarChart3 },
-  { name: 'Requests', href: '/requests', icon: ClipboardList },
   { name: 'Assets', href: '/assets', icon: Package },
-  { name: 'Messages', href: '/messages', icon: MessageSquare },
   { name: 'Categories', href: '/categories', icon: Tags },
   { name: 'Parts Inventory', href: '/parts', icon: Boxes },
-  {
-    name: 'Library',
-    icon: BookOpen,
-    children: [
-      { name: 'Asset Packages', href: '/library/asset-packages' },
-      { name: 'Work Orders', href: '/library/work-orders' },
-      { name: 'Procedures', href: '/library/procedures' },
-    ],
-  },
-  { name: 'Meters', href: '/meters', icon: Gauge },
-  { name: 'Automations', href: '/automations', icon: Zap },
-  { name: 'Locations', href: '/locations', icon: MapPin },
+  { name: 'Procedures', href: '/library/procedures', icon: Tags },
   { name: 'Teams / Users', href: '/teams-users', icon: Users },
   { name: 'Vendors', href: '/vendors', icon: Truck },
-  { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
 const Sidebar = () => {
   const { sidebarOpen, toggleSidebar, currentUser } = useStore();
-  const location = useLocation();
-  const navigate = useNavigate();
-
-  const isLibraryRoute = useMemo(() => location.pathname.startsWith('/library'), [location.pathname]);
-  const [libraryOpen, setLibraryOpen] = useState(isLibraryRoute);
 
   return (
     <>
@@ -85,64 +58,6 @@ const Sidebar = () => {
           <ul className="space-y-1">
             {navigation.map((item) => {
               const Icon = item.icon;
-
-              if (item.children && item.children.length) {
-                const parentActive = isLibraryRoute;
-                return (
-                  <li key={item.name}>
-                    <button
-                      type="button"
-                      className={`
-                        w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200
-                        ${parentActive
-                          ? 'bg-gray-900/40 text-white border-r-2 border-primary-500'
-                          : 'text-gray-300 hover:bg-gray-900/30 hover:text-white'
-                        }
-                      `}
-                      onClick={() => {
-                        setLibraryOpen((v) => !v);
-                        if (!isLibraryRoute) {
-                          navigate(item.children[0].href);
-                        }
-                        if (window.innerWidth < 1024) {
-                          toggleSidebar();
-                        }
-                      }}
-                    >
-                      <span className="flex items-center">
-                        <Icon className="mr-3 h-5 w-5" />
-                        {item.name}
-                      </span>
-                      <ChevronDown className={`h-4 w-4 transition-transform ${libraryOpen ? 'rotate-180' : ''}`} />
-                    </button>
-
-                    {libraryOpen && (
-                      <div className="mt-1 ml-8 space-y-1">
-                        {item.children.map((child) => (
-                          <NavLink
-                            key={child.name}
-                            to={child.href}
-                            className={({ isActive }) => `
-                              block px-3 py-2 text-sm rounded-md transition-colors duration-200
-                              ${isActive
-                                ? 'bg-gray-900/40 text-white'
-                                : 'text-gray-300 hover:bg-gray-900/30 hover:text-white'
-                              }
-                            `}
-                            onClick={() => {
-                              if (window.innerWidth < 1024) {
-                                toggleSidebar();
-                              }
-                            }}
-                          >
-                            {child.name}
-                          </NavLink>
-                        ))}
-                      </div>
-                    )}
-                  </li>
-                );
-              }
 
               return (
                 <li key={item.name}>

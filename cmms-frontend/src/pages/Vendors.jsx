@@ -52,28 +52,6 @@ const Vendors = () => {
     }
   };
 
-  const handleRename = async (vendor) => {
-    const nextName = window.prompt('Vendor name', vendor?.name || '');
-    if (nextName === null) return;
-    const trimmed = String(nextName).trim();
-    if (!trimmed) return;
-    try {
-      await axios.patch(
-        `${API_BASE_URL}/vendors/${vendor.id}`,
-        { name: trimmed },
-        {
-          headers: {
-            accept: 'application/json',
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-      await fetchVendors();
-    } catch (e) {
-      setError(e?.response?.data?.detail || e?.message || 'Failed to update vendor');
-    }
-  };
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -173,7 +151,7 @@ const Vendors = () => {
                         <div className="inline-flex items-center gap-3">
                           <button
                             type="button"
-                            onClick={() => handleRename(v)}
+                            onClick={() => navigate(`/vendors/${v.id}/edit`)}
                             className="text-sm text-primary-600 hover:text-primary-700 font-medium"
                           >
                             Edit

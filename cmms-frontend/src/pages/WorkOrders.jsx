@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Search, ChevronDown, SlidersHorizontal, Upload, X, ListChecks, Calendar, MapPin, User } from 'lucide-react';
+import { Plus, Search, ChevronDown, SlidersHorizontal, X, ListChecks, Calendar, MapPin, User, Lock, PauseCircle, RefreshCw, Check } from 'lucide-react';
 import axios from 'axios';
 import { Button, Badge, Modal } from '../components';
 import useStore from '../store/useStore';
@@ -7,9 +7,10 @@ import useStore from '../store/useStore';
 const API_BASE_URL = 'http://172.18.100.33:8000';
 
 const WorkOrders = () => {
-  const { locations, users, categories, inventory, procedures, currentUser, addUser, addLocation, addAsset, addProcedure } = useStore();
+  const { locations, users, inventory, procedures, currentUser, addUser, addLocation, addAsset, addProcedure } = useStore();
   const [assets, setAssets] = useState([]);
   const [teams, setTeams] = useState([]);
+  const [apiCategories, setApiCategories] = useState([]);
   const [workOrders, setWorkOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -52,10 +53,9 @@ const WorkOrders = () => {
     fields: [],
   });
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState(null);
+  const workOrderDetailsRef = useRef(null);
   const [activeTab, setActiveTab] = useState('todo');
   const [sortBy, setSortBy] = useState('priority_desc');
-  const fileInputRef = useRef(null);
-  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [openFilter, setOpenFilter] = useState('');
   const [assigneeSearch, setAssigneeSearch] = useState('');
   const [locationSearch, setLocationSearch] = useState('');
@@ -92,13 +92,13 @@ const WorkOrders = () => {
     recurrenceWeekOfMonth: 1,
     recurrenceWeekday: 'mon',
     recurrenceIntervalYears: 1,
+    status: 'open',
     workType: 'reactive',
     priority: 'low',
     teamId: '',
     parts: '',
     categoryId: '',
     vendorId: '',
-    attachments: [],
   });
 
   const assetsById = useMemo(() => {
@@ -131,6 +131,15 @@ const WorkOrders = () => {
     }
   };
 
+  const fetchCategories = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/categories`, { headers: { accept: 'application/json' } });
+      setApiCategories(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setApiCategories([]);
+    }
+  };
+
   const fetchWorkOrders = async () => {
     setLoading(true);
     setError('');
@@ -145,6 +154,7 @@ const WorkOrders = () => {
         const procedureId = wo.procedure_id ?? wo.procedureId ?? wo.procedure ?? '';
         const categoryId = wo.category_id ?? wo.categoryId ?? '';
         const vendorId = wo.vendor_id ?? wo.vendorId ?? '';
+        const partId = wo.part_id ?? wo.partId ?? wo.part ?? '';
         return {
           id: String(wo.id),
           title: wo.name || '',
@@ -161,9 +171,9 @@ const WorkOrders = () => {
           procedure: procedureId ? String(procedureId) : '',
           categoryId: categoryId ? String(categoryId) : '',
           vendorId: vendorId ? String(vendorId) : '',
-          status: 'open',
-          assigneeId: '',
-          attachments: [],
+          partId: partId ? String(partId) : '',
+          status: wo.status || 'open',
+          assigneeId: wo.assignee_id ? String(wo.assignee_id) : (wo.assigneeId ? String(wo.assigneeId) : ''),
         };
       });
       setWorkOrders(mapped);
@@ -177,8 +187,36 @@ const WorkOrders = () => {
   useEffect(() => {
     fetchAssets();
     fetchTeams();
+    fetchCategories();
     fetchWorkOrders();
   }, []);
+
+  const handleCreateCategoryFromWorkOrder = async () => {
+    const name = window.prompt('Enter category name');
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return;
+
+    setError('');
+    try {
+      const res = await axios.post(
+        `${API_BASE_URL}/categories`,
+        { name: trimmed },
+        {
+          headers: {
+            accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+      await fetchCategories();
+      const created = res?.data;
+      if (created?.id !== undefined && created?.id !== null) {
+        setCreateForm((p) => ({ ...p, categoryId: String(created.id) }));
+      }
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to create category');
+    }
+  };
 
   const priorityRank = {
     critical: 4,
@@ -210,6 +248,23 @@ const WorkOrders = () => {
     return user?.name || 'Unassigned';
   };
 
+  const getCategoryName = (categoryId) => {
+    const c = (apiCategories || []).find((x) => String(x.id) === String(categoryId));
+    return c?.name || '';
+  };
+
+  const getPartName = (partId) => {
+    const p = (inventory || []).find((x) => String(x.id) === String(partId));
+    return p?.name || '';
+  };
+
+  const getVendorName = (vendorId) => {
+    if (!vendorId) return '';
+    if (String(vendorId) === 'vendor-1') return 'Vendor 1';
+    if (String(vendorId) === 'vendor-2') return 'Vendor 2';
+    return '';
+  };
+
   const getProcedureName = (procedureId) => {
     const p = (procedures || []).find((x) => x.id === procedureId);
     return p?.name || '';
@@ -218,6 +273,7 @@ const WorkOrders = () => {
   const getStatusBadge = (status) => {
     const variants = {
       open: { variant: 'warning', label: 'Open' },
+      on_hold: { variant: 'default', label: 'On Hold' },
       in_progress: { variant: 'info', label: 'In Progress' },
       completed: { variant: 'success', label: 'Completed' },
       cancelled: { variant: 'danger', label: 'Cancelled' }
@@ -322,6 +378,16 @@ const WorkOrders = () => {
 
   const selectedWorkOrder = workOrders.find((wo) => wo.id === selectedWorkOrderId) || null;
 
+  useEffect(() => {
+    if (!selectedWorkOrderId) return;
+    if (!workOrderDetailsRef.current) return;
+    try {
+      workOrderDetailsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch {
+      // noop
+    }
+  }, [selectedWorkOrderId]);
+
   const clearAllFilters = () => {
     setFilters({ status: '', priority: '', asset: '', assignee: '', location: '', dueDatePreset: '', dueDateCustom: '', categoryId: '', part: '' });
     setExtraFilterKeys([]);
@@ -330,8 +396,27 @@ const WorkOrders = () => {
     setOpenFilter('');
   };
 
-  const handleStatusChange = (workOrderId, newStatus) => {
-    setWorkOrders((prev) => prev.map((wo) => (wo.id === workOrderId ? { ...wo, status: newStatus } : wo)));
+  const handleStatusChange = async (workOrderId, newStatus) => {
+    if (!workOrderId) return;
+    setError('');
+    setSaving(true);
+    try {
+      await axios.patch(
+        `${API_BASE_URL}/work-orders/${workOrderId}`,
+        { status: newStatus },
+        {
+          headers: {
+            accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+      await fetchWorkOrders();
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to update status');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const resetCreateForm = () => {
@@ -355,13 +440,13 @@ const WorkOrders = () => {
       recurrenceWeekOfMonth: 1,
       recurrenceWeekday: 'mon',
       recurrenceIntervalYears: 1,
+      status: 'open',
       workType: 'reactive',
       priority: 'low',
       teamId: '',
       parts: '',
       categoryId: '',
       vendorId: '',
-      attachments: [],
     });
   };
 
@@ -401,6 +486,7 @@ const WorkOrders = () => {
       assetName: wo.assetId ? String(getAssetName(wo.assetId) || '') : '',
       procedure: wo.procedure ? String(wo.procedure) : '',
       teamId: wo.teamId ? String(wo.teamId) : '',
+      status: wo.status ? String(wo.status) : 'open',
       estimatedHours: String(hours || ''),
       estimatedMinutes: String(minutes || ''),
       dueDate: toDateInput(wo.dueDate),
@@ -410,6 +496,7 @@ const WorkOrders = () => {
       priority: wo.priority || 'low',
       categoryId: wo.categoryId ? String(wo.categoryId) : '',
       vendorId: wo.vendorId ? String(wo.vendorId) : '',
+      parts: wo.partId ? String(wo.partId) : '',
     }));
 
     setShowCreateModal(true);
@@ -619,36 +706,6 @@ const WorkOrders = () => {
     reader.readAsDataURL(file);
   });
 
-  const addAttachments = async (fileList) => {
-    const files = Array.from(fileList || []);
-    if (files.length === 0) return;
-
-    const mapped = await Promise.all(
-      files.map(async (file) => {
-        const dataUrl = await readFileAsDataUrl(file);
-        return {
-          id: `ATT-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          dataUrl,
-        };
-      })
-    );
-
-    setCreateForm((prev) => ({
-      ...prev,
-      attachments: [...(prev.attachments || []), ...mapped],
-    }));
-  };
-
-  const removeAttachment = (id) => {
-    setCreateForm((prev) => ({
-      ...prev,
-      attachments: (prev.attachments || []).filter((a) => a.id !== id),
-    }));
-  };
-
   const resetLocationForm = () => {
     setLocationForm({
       name: '',
@@ -767,9 +824,16 @@ const WorkOrders = () => {
     const recurrenceYearlyMonth = yearlyBaseDate.getMonth() + 1;
     const recurrenceYearlyDay = yearlyBaseDate.getDate();
 
+    const numericProcedureId = createForm.procedure ? parseInt(String(createForm.procedure), 10) : NaN;
+    const hasNumericProcedureId = Number.isFinite(numericProcedureId);
+    const numericCategoryId = createForm.categoryId ? parseInt(String(createForm.categoryId), 10) : NaN;
+    const numericVendorId = createForm.vendorId ? parseInt(String(createForm.vendorId), 10) : NaN;
+    const numericPartId = createForm.parts ? parseInt(String(createForm.parts), 10) : NaN;
+
     const apiPayload = {
       name: title,
       description: createForm.description.trim(),
+      status: createForm.status || 'open',
       estimated_time_hours: Number.isFinite(hours) ? hours : 0,
       estimated_time_minutes: Number.isFinite(minutes) ? minutes : 0,
       due_date: createForm.dueDate || null,
@@ -780,9 +844,11 @@ const WorkOrders = () => {
       location: location?.name || locationName,
       team_id: teamId ? parseInt(teamId, 10) : null,
       asset_id: assetId ? parseInt(assetId, 10) : null,
-      procedure_id: createForm.procedure ? parseInt(String(createForm.procedure), 10) : null,
-      category_id: createForm.categoryId ? parseInt(String(createForm.categoryId), 10) : null,
-      vendor_id: createForm.vendorId ? parseInt(String(createForm.vendorId), 10) : null,
+      procedure_id: hasNumericProcedureId ? numericProcedureId : null,
+      category_id: Number.isFinite(numericCategoryId) ? numericCategoryId : null,
+      vendor_id: Number.isFinite(numericVendorId) ? numericVendorId : null,
+      part_id: Number.isFinite(numericPartId) ? numericPartId : null,
+      ...(hasNumericProcedureId ? {} : (createForm.procedure ? { procedure: String(createForm.procedure) } : {})),
     };
 
     setSaving(true);
@@ -1176,9 +1242,9 @@ const WorkOrders = () => {
                     {[
                       { key: '', label: 'Any' },
                       { key: 'open', label: 'Open' },
+                      { key: 'on_hold', label: 'On Hold' },
                       { key: 'in_progress', label: 'In Progress' },
                       { key: 'completed', label: 'Completed' },
-                      { key: 'cancelled', label: 'Cancelled' },
                     ].map((opt) => (
                       <button
                         key={opt.key || 'any'}
@@ -1213,7 +1279,7 @@ const WorkOrders = () => {
                     >
                       Any
                     </button>
-                    {(categories || []).map((c) => (
+                    {(apiCategories || []).map((c) => (
                       <button
                         key={c.id}
                         type="button"
@@ -1369,7 +1435,7 @@ const WorkOrders = () => {
         </div>
 
         {/* Right detail */}
-        <div className="lg:col-span-8 bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <div ref={workOrderDetailsRef} className="lg:col-span-8 bg-white border border-gray-200 rounded-lg overflow-hidden">
           {!selectedWorkOrder ? (
             <div className="h-full min-h-[65vh] flex items-center justify-center p-8 text-center">
               <div>
@@ -1409,60 +1475,130 @@ const WorkOrders = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <div className="text-xs font-medium text-gray-500">Asset</div>
-                  <div className="text-sm text-gray-900 mt-1">{getAssetName(selectedWorkOrder.assetId)}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-gray-500">Team</div>
-                  <div className="text-sm text-gray-900 mt-1">{getTeamName(selectedWorkOrder.teamId) || '—'}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-gray-500">Location</div>
-                  <div className="text-sm text-gray-900 mt-1">{getLocationName(selectedWorkOrder.locationId)}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-gray-500">Assigned To</div>
-                  <div className="text-sm text-gray-900 mt-1">{getAssigneeName(selectedWorkOrder.assigneeId)}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-gray-500">Due Date</div>
-                  <div className="text-sm text-gray-900 mt-1">
-                    {selectedWorkOrder.dueDate ? new Date(selectedWorkOrder.dueDate).toLocaleDateString() : 'Not set'}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <div className="text-xs font-medium text-gray-500">Description</div>
-                <div className="text-sm text-gray-900 mt-1">
-                  {selectedWorkOrder.description || 'No description'}
+              <div className="rounded-lg border border-gray-200 overflow-hidden">
+                <div className="px-4 py-3 bg-gray-50 text-sm font-semibold text-gray-900">General</div>
+                <div className="p-4">
+                  <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Status</dt>
+                      <dd className="text-sm text-gray-900 mt-1">{String(selectedWorkOrder.status || 'open')}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Priority</dt>
+                      <dd className="text-sm text-gray-900 mt-1">{String(selectedWorkOrder.priority || 'low')}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Work Type</dt>
+                      <dd className="text-sm text-gray-900 mt-1">{String(selectedWorkOrder.workType || 'reactive')}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Estimated Time</dt>
+                      <dd className="text-sm text-gray-900 mt-1">
+                        {selectedWorkOrder.estimatedDuration
+                          ? `${Math.floor(Number(selectedWorkOrder.estimatedDuration) / 60)}h ${Number(selectedWorkOrder.estimatedDuration) % 60}m`
+                          : '—'}
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
               </div>
 
-              {selectedWorkOrder.attachments && selectedWorkOrder.attachments.length > 0 && (
-                <div>
-                  <div className="text-xs font-medium text-gray-500">Files</div>
-                  <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {selectedWorkOrder.attachments.map((a) => {
-                      const isImage = typeof a?.type === 'string' && a.type.startsWith('image/');
-                      return (
-                        <div key={a.id} className="border border-gray-200 rounded-md overflow-hidden bg-white">
-                          {isImage ? (
-                            <img src={a.dataUrl} alt={a.name} className="h-24 w-full object-cover" />
-                          ) : (
-                            <div className="h-24 w-full flex items-center justify-center text-xs text-gray-600 px-2 text-center">
-                              {a.name}
-                            </div>
-                          )}
-                          <div className="px-2 py-1 text-xs text-gray-700 truncate" title={a.name}>{a.name}</div>
-                        </div>
-                      );
-                    })}
+              <div className="rounded-lg border border-gray-200 overflow-hidden">
+                <div className="px-4 py-3 bg-gray-50 text-sm font-semibold text-gray-900">Assignment & Location</div>
+                <div className="p-4">
+                  <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Assigned To</dt>
+                      <dd className="text-sm text-gray-900 mt-1">{getAssigneeName(selectedWorkOrder.assigneeId)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Team</dt>
+                      <dd className="text-sm text-gray-900 mt-1">{getTeamName(selectedWorkOrder.teamId) || '—'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Asset</dt>
+                      <dd className="text-sm text-gray-900 mt-1">{getAssetName(selectedWorkOrder.assetId)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Location</dt>
+                      <dd className="text-sm text-gray-900 mt-1">{getLocationName(selectedWorkOrder.locationId)}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 overflow-hidden">
+                <div className="px-4 py-3 bg-gray-50 text-sm font-semibold text-gray-900">Scheduling</div>
+                <div className="p-4">
+                  <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Start Date</dt>
+                      <dd className="text-sm text-gray-900 mt-1">
+                        {selectedWorkOrder.startDate ? new Date(selectedWorkOrder.startDate).toLocaleDateString() : '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Due Date</dt>
+                      <dd className="text-sm text-gray-900 mt-1">
+                        {selectedWorkOrder.dueDate ? new Date(selectedWorkOrder.dueDate).toLocaleDateString() : '—'}
+                      </dd>
+                    </div>
+                    <div className="md:col-span-2">
+                      <dt className="text-xs font-medium text-gray-500">Recurrence</dt>
+                      <dd className="text-sm text-gray-900 mt-1">{String(selectedWorkOrder.recurrence || 'does_not_repeat')}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 overflow-hidden">
+                <div className="px-4 py-3 bg-gray-50 text-sm font-semibold text-gray-900">Procedure, Parts, Category, Vendor</div>
+                <div className="p-4">
+                  <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Procedure</dt>
+                      <dd className="text-sm text-gray-900 mt-1">
+                        {selectedWorkOrder.procedure
+                          ? (getProcedureName(selectedWorkOrder.procedure) || String(selectedWorkOrder.procedure))
+                          : '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Part</dt>
+                      <dd className="text-sm text-gray-900 mt-1">
+                        {selectedWorkOrder.partId
+                          ? (getPartName(selectedWorkOrder.partId) || String(selectedWorkOrder.partId))
+                          : '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Category</dt>
+                      <dd className="text-sm text-gray-900 mt-1">
+                        {selectedWorkOrder.categoryId
+                          ? (getCategoryName(selectedWorkOrder.categoryId) || String(selectedWorkOrder.categoryId))
+                          : '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-medium text-gray-500">Vendor</dt>
+                      <dd className="text-sm text-gray-900 mt-1">
+                        {selectedWorkOrder.vendorId
+                          ? (getVendorName(selectedWorkOrder.vendorId) || String(selectedWorkOrder.vendorId))
+                          : '—'}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 overflow-hidden">
+                <div className="px-4 py-3 bg-gray-50 text-sm font-semibold text-gray-900">Description</div>
+                <div className="p-4">
+                  <div className="text-sm text-gray-900 whitespace-pre-wrap">
+                    {selectedWorkOrder.description || '—'}
                   </div>
                 </div>
-              )}
+              </div>
 
               {selectedWorkOrder.checklist && selectedWorkOrder.checklist.length > 0 && (
                 <div>
@@ -1508,67 +1644,6 @@ const WorkOrders = () => {
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
               placeholder="Describe the work"
             />
-          </div>
-
-          <div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                addAttachments(e.target.files);
-                e.target.value = '';
-              }}
-            />
-
-            <div
-              className={`w-full rounded-md border-2 border-dashed p-6 transition-colors ${isDraggingFiles ? 'border-primary-500 bg-primary-50' : 'border-gray-300 bg-gray-50'}`}
-              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingFiles(true); }}
-              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingFiles(true); }}
-              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingFiles(false); }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setIsDraggingFiles(false);
-                addAttachments(e.dataTransfer.files);
-              }}
-            >
-              <div className="flex flex-col items-center text-center gap-2">
-                <div className="h-10 w-10 rounded-full bg-white border border-gray-200 flex items-center justify-center">
-                  <Upload className="h-5 w-5 text-gray-500" />
-                </div>
-                <button
-                  type="button"
-                  className="text-sm font-medium text-primary-600 hover:text-primary-700"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  Add or drag pictures
-                </button>
-                <div className="text-xs text-gray-500">PNG, JPG, GIF</div>
-              </div>
-            </div>
-
-            {createForm.attachments && createForm.attachments.length > 0 && (
-              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
-                {createForm.attachments.map((a) => (
-                  <div key={a.id} className="relative border border-gray-200 rounded-md overflow-hidden bg-white">
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(a.id)}
-                      className="absolute top-1 right-1 h-7 w-7 rounded-full bg-white/90 border border-gray-200 flex items-center justify-center hover:bg-white"
-                      aria-label="Remove"
-                      title="Remove"
-                    >
-                      <X className="h-4 w-4 text-gray-600" />
-                    </button>
-                    <img src={a.dataUrl} alt={a.name} className="h-24 w-full object-cover" />
-                    <div className="px-2 py-1 text-xs text-gray-700 truncate" title={a.name}>{a.name}</div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
           <div>
@@ -2049,6 +2124,36 @@ const WorkOrders = () => {
                 <option value="reactive">Reactive</option>
                 <option value="preventive">Preventive</option>
               </select>
+
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { key: 'open', label: 'Open', Icon: Lock },
+                    { key: 'on_hold', label: 'On Hold', Icon: PauseCircle },
+                    { key: 'in_progress', label: 'In Progress', Icon: RefreshCw },
+                    { key: 'completed', label: 'Done', Icon: Check },
+                  ].map((s) => {
+                    const active = (createForm.status || 'open') === s.key;
+                    const Icon = s.Icon;
+                    return (
+                      <button
+                        key={s.key}
+                        type="button"
+                        onClick={() => setCreateForm((p) => ({ ...p, status: s.key }))}
+                        className={`flex flex-col items-center justify-center gap-1 rounded-md border px-2 py-2 text-xs font-medium transition-colors ${
+                          active
+                            ? 'bg-primary-600 border-primary-600 text-white'
+                            : 'bg-white border-gray-300 text-primary-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {s.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -2075,18 +2180,6 @@ const WorkOrders = () => {
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Files</label>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-2 px-4 py-2 border border-primary-500 text-primary-700 rounded-md text-sm hover:bg-primary-50"
-              >
-                <Upload className="h-4 w-4" />
-                Attach files
-              </button>
-            </div>
-
-            <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Parts</label>
               <div className="relative">
                 <select
@@ -2112,12 +2205,20 @@ const WorkOrders = () => {
                   className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
                 >
                   <option value="">Start typing...</option>
-                  {(categories || []).map((c) => (
+                  {(apiCategories || []).map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               </div>
+              <button
+                type="button"
+                onClick={handleCreateCategoryFromWorkOrder}
+                className="mt-2 inline-flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700"
+              >
+                <span className="text-lg leading-none">+</span>
+                Add new category
+              </button>
             </div>
 
             <div>
