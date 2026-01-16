@@ -19,6 +19,8 @@ const TopBar = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
+  const lightModeOn = !darkMode;
+
   const unreadNotifications = notifications.filter(n => !n.read);
   const unreadCount = unreadNotifications.length;
 
@@ -61,17 +63,17 @@ const TopBar = () => {
             type="button"
             onClick={toggleDarkMode}
             className="inline-flex items-center gap-2 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
-            aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-            title={darkMode ? 'Light mode' : 'Dark mode'}
+            aria-label={lightModeOn ? 'Switch to dark mode' : 'Switch to light mode'}
+            title={lightModeOn ? 'Light mode' : 'Dark mode'}
           >
             <span className="text-gray-500 dark:text-gray-300">
-              {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {lightModeOn ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </span>
             <span
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${darkMode ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-700'}`}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${lightModeOn ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-700'}`}
             >
               <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${darkMode ? 'translate-x-4' : 'translate-x-1'}`}
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${lightModeOn ? 'translate-x-4' : 'translate-x-1'}`}
               />
             </span>
           </button>

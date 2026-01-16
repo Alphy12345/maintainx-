@@ -1,8 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Camera, Paperclip, Plus } from 'lucide-react';
+import axios from 'axios';
 import { Button } from '../components';
 import useStore from '../store/useStore';
+
+const API_BASE_URL = 'http://172.18.100.33:8000';
 
 const COLORS = [
   { id: 'blue', className: 'bg-blue-500' },
@@ -18,6 +21,9 @@ const COLORS = [
 const VendorCreate = () => {
   const navigate = useNavigate();
   const { locations, assets, inventory } = useStore();
+
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -47,9 +53,30 @@ const VendorCreate = () => {
     ]);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    navigate('/vendors');
+    const name = String(formData.name || '').trim();
+    if (!name) return;
+
+    setSaving(true);
+    setError('');
+    try {
+      await axios.post(
+        `${API_BASE_URL}/vendors`,
+        { name },
+        {
+          headers: {
+            accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+      navigate('/vendors');
+    } catch (e2) {
+      setError(e2?.response?.data?.detail || e2?.message || 'Failed to create vendor');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -59,6 +86,12 @@ const VendorCreate = () => {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-8">
+        {error ? (
+          <div className="p-3 rounded-md border border-red-200 bg-red-50 text-red-700 text-sm">
+            {error}
+          </div>
+        ) : null}
+
         <div>
           <input
             type="text"
@@ -233,7 +266,7 @@ const VendorCreate = () => {
           >
             Cancel
           </button>
-          <Button type="submit">Create</Button>
+          <Button type="submit" disabled={saving}>{saving ? 'Creating…' : 'Create'}</Button>
         </div>
       </form>
     </div>

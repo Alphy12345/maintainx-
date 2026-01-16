@@ -1,11 +1,22 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Plus, Filter, Search, Power, Wrench, CheckCircle, Upload, Paperclip, QrCode, ChevronDown, X } from 'lucide-react';
+import axios from 'axios';
 import { Card, CardHeader, CardBody, Button, Badge, Table, Modal } from '../components';
 import useStore from '../store/useStore';
 
+const API_BASE_URL = 'http://172.18.100.33:8000';
+
 const Assets = () => {
-  const { assets, locations, assetHealthEvents, updateAssetStatus, addAsset } = useStore();
+  const { locations } = useStore();
+  const [assets, setAssets] = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const assetHealthEvents = [];
+  const updateAssetStatus = () => {};
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState(null);
   const pictureInputRef = useRef(null);
@@ -28,7 +39,7 @@ const Assets = () => {
     teamsInCharge: '',
     barcode: '',
     assetType: '',
-    vendor: '',
+    vendorId: '',
     parts: '',
     parentAssetId: '',
   });
@@ -119,9 +130,58 @@ const Assets = () => {
   });
 
   const getLocationName = (locationId) => {
-    const location = locations.find(l => l.id === locationId);
-    return location?.name || 'Unknown Location';
+    const list = Array.isArray(locations) ? locations : [];
+    const location = list.find(l => l.id === locationId);
+    if (location?.name) return location.name;
+    if (typeof locationId === 'string' && locationId.trim()) return locationId;
+    return 'Unknown Location';
   };
+
+  const fetchAssets = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await axios.get(`${API_BASE_URL}/assets`, {
+        headers: { accept: 'application/json' },
+      });
+      const rows = Array.isArray(res.data) ? res.data : [];
+      const mapped = rows.map((a) => ({
+        id: a.id,
+        name: a.asset_name,
+        locationId: a.location,
+        criticality: a.criticality,
+        description: a.description,
+        manufacturer: a.manufacturer,
+        model: a.model,
+        serialNumber: a.model_serial_no,
+        year: a.year,
+        assetType: a.asset_type,
+        vendorId: a.vendor_id,
+        status: 'running',
+      }));
+      setAssets(mapped);
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to load assets');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchVendors = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/vendors`, {
+        headers: { accept: 'application/json' },
+      });
+      setVendors(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setVendors([]);
+    }
+  };
+
+  useEffect(() => {
+    fetchAssets();
+    fetchVendors();
+  }, []);
 
   const getStatusBadge = (status) => {
     const variants = {
@@ -146,14 +206,19 @@ const Assets = () => {
       sortable: true
     },
     {
-      key: 'category',
-      title: 'Category',
-      sortable: true
-    },
-    {
       key: 'locationId',
       title: 'Location',
       render: (value) => getLocationName(value)
+    },
+    {
+      key: 'assetType',
+      title: 'Asset Type',
+      sortable: true
+    },
+    {
+      key: 'criticality',
+      title: 'Criticality',
+      sortable: true
     },
     {
       key: 'status',
@@ -161,16 +226,33 @@ const Assets = () => {
       render: (value) => getStatusBadge(value)
     },
     {
-      key: 'lastMaintenanceDate',
-      title: 'Last Maintenance',
-      format: 'date',
-      sortable: true
-    },
-    {
-      key: 'nextMaintenanceDate',
-      title: 'Next Maintenance',
-      format: 'date',
-      sortable: true
+      key: 'actions',
+      title: 'Actions',
+      sortable: false,
+      render: (_value, row) => (
+        <div className="flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRenameAsset(row);
+            }}
+            className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDeleteAsset(row.id);
+            }}
+            className="text-sm text-red-600 hover:text-red-700 font-medium"
+          >
+            Delete
+          </button>
+        </div>
+      )
     }
   ];
 
@@ -200,7 +282,7 @@ const Assets = () => {
       teamsInCharge: '',
       barcode: generateBarcode(),
       assetType: '',
-      vendor: '',
+      vendorId: '',
       parts: '',
       parentAssetId: '',
     });
@@ -273,32 +355,95 @@ const Assets = () => {
     }));
   };
 
-  const handleCreateAsset = () => {
-    const name = createForm.name.trim();
-    if (!name) return;
+  const handleCreateAsset = async () => {
+    const assetName = String(createForm.name || '').trim();
+    if (!assetName) return;
 
-    addAsset({
-      name,
-      description: createForm.description.trim() || undefined,
-      locationId: createForm.locationId || undefined,
-      criticality: createForm.criticality || undefined,
-      year: createForm.year ? parseInt(createForm.year, 10) : undefined,
-      manufacturer: createForm.manufacturer.trim() || undefined,
-      model: createForm.model.trim() || undefined,
-      serialNumber: createForm.serialNumber.trim() || undefined,
-      teamsInCharge: createForm.teamsInCharge.trim() || undefined,
-      barcode: createForm.barcode.trim() || undefined,
-      assetType: createForm.assetType.trim() || undefined,
-      vendor: createForm.vendor.trim() || undefined,
-      parts: createForm.parts.trim() || undefined,
-      parentAssetId: createForm.parentAssetId || undefined,
-      pictures: createForm.pictures || [],
-      files: createForm.files || [],
-      status: 'running',
-    });
+    const location = getLocationName(createForm.locationId);
+    const year = createForm.year ? parseInt(createForm.year, 10) : new Date().getFullYear();
+    const vendorId = createForm.vendorId ? parseInt(createForm.vendorId, 10) : undefined;
 
-    setShowCreateModal(false);
-    resetCreateForm();
+    setSaving(true);
+    setError('');
+    try {
+      await axios.post(
+        `${API_BASE_URL}/assets`,
+        {
+          asset_name: assetName,
+          location: location === 'Unknown Location' ? '' : location,
+          criticality: String(createForm.criticality || ''),
+          description: String(createForm.description || ''),
+          manufacturer: String(createForm.manufacturer || ''),
+          model: String(createForm.model || ''),
+          model_serial_no: String(createForm.serialNumber || ''),
+          year,
+          asset_type: String(createForm.assetType || ''),
+          vendor_id: vendorId,
+        },
+        {
+          headers: {
+            accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+      setShowCreateModal(false);
+      resetCreateForm();
+      await fetchAssets();
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to create asset');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteAsset = async (assetId) => {
+    const ok = window.confirm('Delete this asset?');
+    if (!ok) return;
+    setError('');
+    try {
+      await axios.delete(`${API_BASE_URL}/assets/${assetId}`, {
+        headers: { accept: '*/*' },
+      });
+      if (selectedAsset?.id === assetId) setSelectedAsset(null);
+      await fetchAssets();
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to delete asset');
+    }
+  };
+
+  const handleRenameAsset = async (asset) => {
+    const nextName = window.prompt('Asset name', asset?.name || '');
+    if (nextName === null) return;
+    const trimmed = String(nextName).trim();
+    if (!trimmed) return;
+    setError('');
+    try {
+      await axios.patch(
+        `${API_BASE_URL}/assets/${asset.id}`,
+        {
+          asset_name: trimmed,
+          location: String(asset.locationId || ''),
+          criticality: String(asset.criticality || ''),
+          description: String(asset.description || ''),
+          manufacturer: String(asset.manufacturer || ''),
+          model: String(asset.model || ''),
+          model_serial_no: String(asset.serialNumber || ''),
+          year: asset.year || new Date().getFullYear(),
+          asset_type: String(asset.assetType || ''),
+          vendor_id: asset.vendorId,
+        },
+        {
+          headers: {
+            accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+      await fetchAssets();
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to update asset');
+    }
   };
 
   return (
@@ -314,6 +459,19 @@ const Assets = () => {
           Add Asset
         </Button>
       </div>
+
+      {error ? (
+        <div className="p-4 rounded-md border border-red-200 bg-red-50 text-red-700 text-sm flex items-center justify-between">
+          <div>{error}</div>
+          <button
+            type="button"
+            onClick={() => fetchAssets()}
+            className="text-sm font-medium text-red-700 hover:text-red-800"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -524,6 +682,7 @@ const Assets = () => {
             data={filteredAssets}
             onRowClick={handleRowClick}
             sortable
+            loading={loading}
           />
         </CardBody>
       </Card>
@@ -843,13 +1002,19 @@ const Assets = () => {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Vendors</label>
-              <input
-                type="text"
-                value={createForm.vendor}
-                onChange={(e) => setCreateForm((p) => ({ ...p, vendor: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
-                placeholder="Start typing..."
-              />
+              <div className="relative">
+                <select
+                  value={createForm.vendorId}
+                  onChange={(e) => setCreateForm((p) => ({ ...p, vendorId: e.target.value }))}
+                  className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md bg-white focus:ring-primary-500 focus:border-primary-500"
+                >
+                  <option value="">Select Vendor</option>
+                  {vendors.map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
             </div>
 
             <div>
@@ -885,8 +1050,8 @@ const Assets = () => {
             <Button variant="secondary" onClick={() => { setShowCreateModal(false); resetCreateForm(); }}>
               Cancel
             </Button>
-            <Button onClick={handleCreateAsset} disabled={!createForm.name.trim()}>
-              Create
+            <Button onClick={handleCreateAsset} disabled={!createForm.name.trim() || saving}>
+              {saving ? 'Creating…' : 'Create'}
             </Button>
           </div>
         </div>
@@ -905,6 +1070,12 @@ const Assets = () => {
             <div className="flex items-center justify-between">
               {getStatusBadge(selectedAsset.status)}
               <div className="flex space-x-2">
+                <Button variant="secondary" onClick={() => handleRenameAsset(selectedAsset)}>
+                  Edit
+                </Button>
+                <Button variant="secondary" onClick={() => handleDeleteAsset(selectedAsset.id)}>
+                  Delete
+                </Button>
                 {selectedAsset.status === 'running' && (
                   <Button variant="warning" onClick={() => handleStatusChange(selectedAsset.id, 'maintenance')}>
                     Schedule Maintenance

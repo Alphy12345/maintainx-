@@ -1,11 +1,37 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Search, ChevronDown, SlidersHorizontal, Upload, X, ListChecks, Calendar, MapPin, User } from 'lucide-react';
+import axios from 'axios';
 import { Button, Badge, Modal } from '../components';
 import useStore from '../store/useStore';
 
+const API_BASE_URL = 'http://172.18.100.33:8000';
+
 const WorkOrders = () => {
-  const { workOrders, assets, locations, users, categories, inventory, procedures, currentUser, addWorkOrder, addUser, addLocation, addAsset, addProcedure, updateWorkOrder } = useStore();
+  const { locations, users, categories, inventory, procedures, currentUser, addUser, addLocation, addAsset, addProcedure } = useStore();
+  const [assets, setAssets] = useState([]);
+  const [teams, setTeams] = useState([]);
+  const [workOrders, setWorkOrders] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [workOrderMode, setWorkOrderMode] = useState('create');
+  const [editingWorkOrderId, setEditingWorkOrderId] = useState(null);
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [isDraggingLocationPictures, setIsDraggingLocationPictures] = useState(false);
+  const [locationPicturesInputKey, setLocationPicturesInputKey] = useState(0);
+  const [locationFilesInputKey, setLocationFilesInputKey] = useState(0);
+  const [locationForm, setLocationForm] = useState({
+    name: '',
+    address: '',
+    description: '',
+    teamsInCharge: [],
+    barcode: '',
+    vendors: '',
+    parentId: '',
+    pictures: [],
+    files: [],
+  });
   const [showAssetsModal, setShowAssetsModal] = useState(false);
   const [showAddAssetModal, setShowAddAssetModal] = useState(false);
   const [assetSearch, setAssetSearch] = useState('');
@@ -22,7 +48,7 @@ const WorkOrders = () => {
   const [selectedProcedureId, setSelectedProcedureId] = useState('');
   const [newProcedureForm, setNewProcedureForm] = useState({
     name: '',
-    description: '',
+    description: null,
     fields: [],
   });
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState(null);
@@ -51,6 +77,7 @@ const WorkOrders = () => {
     description: '',
     locationName: '',
     assetName: '',
+    assetId: '',
     procedure: '',
     assignee: '',
     estimatedHours: '',
@@ -67,11 +94,91 @@ const WorkOrders = () => {
     recurrenceIntervalYears: 1,
     workType: 'reactive',
     priority: 'low',
+    teamId: '',
     parts: '',
     categoryId: '',
     vendorId: '',
     attachments: [],
   });
+
+  const assetsById = useMemo(() => {
+    const map = new Map();
+    for (const a of assets) map.set(String(a.id), a);
+    return map;
+  }, [assets]);
+
+  const teamsById = useMemo(() => {
+    const map = new Map();
+    for (const t of teams) map.set(String(t.id), t);
+    return map;
+  }, [teams]);
+
+  const fetchAssets = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/assets`, { headers: { accept: 'application/json' } });
+      setAssets(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setAssets([]);
+    }
+  };
+
+  const fetchTeams = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/teams`, { headers: { accept: 'application/json' } });
+      setTeams(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setTeams([]);
+    }
+  };
+
+  const fetchWorkOrders = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await axios.get(`${API_BASE_URL}/work-orders`, { headers: { accept: 'application/json' } });
+      const rows = Array.isArray(res.data) ? res.data : [];
+      const mapped = rows.map((wo) => {
+        const estimatedDuration = (Number(wo.estimated_time_hours || 0) * 60) + Number(wo.estimated_time_minutes || 0);
+        const dueIso = wo.due_date ? new Date(wo.due_date).toISOString() : undefined;
+        const startIso = wo.start_date ? new Date(wo.start_date).toISOString() : undefined;
+
+        const procedureId = wo.procedure_id ?? wo.procedureId ?? wo.procedure ?? '';
+        const categoryId = wo.category_id ?? wo.categoryId ?? '';
+        const vendorId = wo.vendor_id ?? wo.vendorId ?? '';
+        return {
+          id: String(wo.id),
+          title: wo.name || '',
+          description: wo.description || '',
+          estimatedDuration: estimatedDuration || undefined,
+          dueDate: dueIso,
+          startDate: startIso,
+          recurrence: wo.recurrence || 'does_not_repeat',
+          workType: wo.work_type || 'reactive',
+          priority: wo.priority || 'low',
+          locationId: wo.location || '',
+          assetId: wo.asset_id ? String(wo.asset_id) : '',
+          teamId: wo.team_id ? String(wo.team_id) : '',
+          procedure: procedureId ? String(procedureId) : '',
+          categoryId: categoryId ? String(categoryId) : '',
+          vendorId: vendorId ? String(vendorId) : '',
+          status: 'open',
+          assigneeId: '',
+          attachments: [],
+        };
+      });
+      setWorkOrders(mapped);
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to load work orders');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAssets();
+    fetchTeams();
+    fetchWorkOrders();
+  }, []);
 
   const priorityRank = {
     critical: 4,
@@ -81,13 +188,21 @@ const WorkOrders = () => {
   };
 
   const getAssetName = (assetId) => {
-    const asset = assets.find(a => a.id === assetId);
-    return asset?.name || 'Unknown Asset';
+    const asset = assetsById.get(String(assetId));
+    return asset?.asset_name || asset?.name || 'Unknown Asset';
+  };
+
+  const getTeamName = (teamId) => {
+    const team = teamsById.get(String(teamId));
+    return team?.team_name || '';
   };
 
   const getLocationName = (locationId) => {
-    const location = locations.find(l => l.id === locationId);
-    return location?.name || 'Unknown Location';
+    const list = Array.isArray(locations) ? locations : [];
+    const location = list.find(l => l.id === locationId);
+    if (location?.name) return location.name;
+    if (typeof locationId === 'string' && locationId.trim()) return locationId;
+    return 'Unknown Location';
   };
 
   const getAssigneeName = (assigneeId) => {
@@ -178,8 +293,8 @@ const WorkOrders = () => {
 
   const filteredWorkOrders = workOrders
     .filter((wo) => {
-      const matchesSearch = wo.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        wo.id.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesSearch = (wo.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        String(wo.id || '').toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesTab = activeTab === 'done'
         ? isDoneStatus(wo.status)
@@ -216,7 +331,7 @@ const WorkOrders = () => {
   };
 
   const handleStatusChange = (workOrderId, newStatus) => {
-    updateWorkOrder(workOrderId, { status: newStatus });
+    setWorkOrders((prev) => prev.map((wo) => (wo.id === workOrderId ? { ...wo, status: newStatus } : wo)));
   };
 
   const resetCreateForm = () => {
@@ -225,6 +340,7 @@ const WorkOrders = () => {
       description: '',
       locationName: '',
       assetName: '',
+      assetId: '',
       procedure: '',
       assignee: '',
       estimatedHours: '',
@@ -241,11 +357,62 @@ const WorkOrders = () => {
       recurrenceIntervalYears: 1,
       workType: 'reactive',
       priority: 'low',
+      teamId: '',
       parts: '',
       categoryId: '',
       vendorId: '',
       attachments: [],
     });
+  };
+
+  const openCreateWorkOrder = () => {
+    setWorkOrderMode('create');
+    setEditingWorkOrderId(null);
+    resetCreateForm();
+    setShowCreateModal(true);
+  };
+
+  const openEditWorkOrder = (wo) => {
+    if (!wo) return;
+    setWorkOrderMode('edit');
+    setEditingWorkOrderId(wo.id);
+
+    const duration = Number(wo.estimatedDuration || 0);
+    const hours = duration ? Math.floor(duration / 60) : 0;
+    const minutes = duration ? duration % 60 : 0;
+
+    const toDateInput = (isoOrDate) => {
+      if (!isoOrDate) return '';
+      try {
+        const d = new Date(isoOrDate);
+        if (Number.isNaN(d.getTime())) return '';
+        return d.toISOString().slice(0, 10);
+      } catch {
+        return '';
+      }
+    };
+
+    setCreateForm((p) => ({
+      ...p,
+      title: wo.title || '',
+      description: wo.description || '',
+      locationName: typeof wo.locationId === 'string' ? wo.locationId : '',
+      assetId: wo.assetId ? String(wo.assetId) : '',
+      assetName: wo.assetId ? String(getAssetName(wo.assetId) || '') : '',
+      procedure: wo.procedure ? String(wo.procedure) : '',
+      teamId: wo.teamId ? String(wo.teamId) : '',
+      estimatedHours: String(hours || ''),
+      estimatedMinutes: String(minutes || ''),
+      dueDate: toDateInput(wo.dueDate),
+      startDate: toDateInput(wo.startDate),
+      recurrence: wo.recurrence || 'does_not_repeat',
+      workType: wo.workType || 'reactive',
+      priority: wo.priority || 'low',
+      categoryId: wo.categoryId ? String(wo.categoryId) : '',
+      vendorId: wo.vendorId ? String(wo.vendorId) : '',
+    }));
+
+    setShowCreateModal(true);
   };
 
   const resetNewAssetForm = () => {
@@ -261,7 +428,7 @@ const WorkOrders = () => {
   const resetNewProcedureForm = () => {
     setNewProcedureForm({
       name: '',
-      description: '',
+      description: null,
       fields: [
         { id: `PF-${Date.now()}-${Math.random().toString(16).slice(2)}`, name: 'Field Name', type: 'text', required: false },
       ],
@@ -415,6 +582,19 @@ const WorkOrders = () => {
       description: (newAssetForm.description || '').trim() || undefined,
     });
 
+    if (created?.id) {
+      setAssets((prev) => {
+        const list = Array.isArray(prev) ? prev : [];
+        if (list.some((a) => String(a.id) === String(created.id))) return list;
+        return [...list, { id: created.id, name: created.name, asset_name: created.name }];
+      });
+      setCreateForm((p) => ({
+        ...p,
+        assetId: String(created.id),
+        assetName: created.name,
+      }));
+    }
+
     setCreateForm((p) => ({
       ...p,
       assetName: created.name,
@@ -424,6 +604,10 @@ const WorkOrders = () => {
     setShowAddAssetModal(false);
     resetNewAssetForm();
     setShowAssetsModal(false);
+  };
+
+  const handleAddNewLocation = () => {
+    openNewLocationModal();
   };
 
   const normalize = (s) => (s || '').trim().toLowerCase();
@@ -465,45 +649,106 @@ const WorkOrders = () => {
     }));
   };
 
-  const handleCreate = () => {
+  const resetLocationForm = () => {
+    setLocationForm({
+      name: '',
+      address: '',
+      description: '',
+      teamsInCharge: [],
+      barcode: '',
+      vendors: '',
+      parentId: '',
+      pictures: [],
+      files: [],
+    });
+    setIsDraggingLocationPictures(false);
+    setLocationPicturesInputKey((k) => k + 1);
+    setLocationFilesInputKey((k) => k + 1);
+  };
+
+  const openNewLocationModal = () => {
+    resetLocationForm();
+    setShowLocationModal(true);
+  };
+
+  const addLocationPictures = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+    const mapped = await Promise.all(
+      files.map(async (file) => {
+        const dataUrl = await readFileAsDataUrl(file);
+        return {
+          id: `LOC-PIC-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          dataUrl,
+        };
+      })
+    );
+    setLocationForm((p) => ({ ...p, pictures: [...(p.pictures || []), ...mapped] }));
+  };
+
+  const removeLocationPicture = (id) => {
+    setLocationForm((p) => ({ ...p, pictures: (p.pictures || []).filter((x) => x.id !== id) }));
+  };
+
+  const addLocationFiles = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+    const mapped = await Promise.all(
+      files.map(async (file) => {
+        const dataUrl = await readFileAsDataUrl(file);
+        return {
+          id: `LOC-FILE-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          dataUrl,
+        };
+      })
+    );
+    setLocationForm((p) => ({ ...p, files: [...(p.files || []), ...mapped] }));
+  };
+
+  const removeLocationFile = (id) => {
+    setLocationForm((p) => ({ ...p, files: (p.files || []).filter((x) => x.id !== id) }));
+  };
+
+  const handleCreateLocationFromModal = () => {
+    const name = String(locationForm.name || '').trim();
+    if (!name) return;
+    const created = addLocation({
+      name,
+      type: 'site',
+      address: String(locationForm.address || '').trim() || undefined,
+      description: String(locationForm.description || '').trim() || undefined,
+      teamsInCharge: Array.isArray(locationForm.teamsInCharge) ? locationForm.teamsInCharge : [],
+      barcode: String(locationForm.barcode || '').trim() || undefined,
+      vendors: String(locationForm.vendors || '').trim() || undefined,
+      parentId: String(locationForm.parentId || '').trim() || undefined,
+      pictures: locationForm.pictures || [],
+      files: locationForm.files || [],
+    });
+
+    setCreateForm((p) => ({ ...p, locationName: created?.name || name }));
+    setShowLocationModal(false);
+    resetLocationForm();
+  };
+
+  const handleSaveWorkOrder = async () => {
     const title = createForm.title.trim();
     if (!title) return;
 
     const locationName = createForm.locationName.trim();
-    const assetName = createForm.assetName.trim();
-    const assigneeText = createForm.assignee.trim();
+    const assetId = createForm.assetId ? String(createForm.assetId) : '';
+    const teamId = createForm.teamId ? String(createForm.teamId) : '';
 
     let location = null;
     if (locationName) {
-      location = locations.find((l) => normalize(l.name) === normalize(locationName)) || null;
+      location = (Array.isArray(locations) ? locations : []).find((l) => normalize(l.name) === normalize(locationName)) || null;
       if (!location) {
         location = addLocation({ name: locationName, type: 'site' });
-      }
-    }
-
-    let asset = null;
-    if (assetName) {
-      asset = assets.find((a) => normalize(a.name) === normalize(assetName)) || null;
-      if (!asset) {
-        asset = addAsset({
-          name: assetName,
-          category: 'Uncategorized',
-          locationId: location?.id || '',
-          status: 'running',
-        });
-      }
-    }
-
-    let assigneeUser = null;
-    if (assigneeText) {
-      assigneeUser = users.find((u) => normalize(u.email) === normalize(assigneeText) || normalize(u.name) === normalize(assigneeText)) || null;
-      if (!assigneeUser) {
-        const looksLikeEmail = assigneeText.includes('@');
-        assigneeUser = addUser({
-          name: looksLikeEmail ? assigneeText.split('@')[0] : assigneeText,
-          email: looksLikeEmail ? assigneeText : '',
-          role: 'technician',
-        });
       }
     }
 
@@ -522,38 +767,84 @@ const WorkOrders = () => {
     const recurrenceYearlyMonth = yearlyBaseDate.getMonth() + 1;
     const recurrenceYearlyDay = yearlyBaseDate.getDate();
 
-    const created = addWorkOrder({
-      title,
+    const apiPayload = {
+      name: title,
       description: createForm.description.trim(),
-      assetId: asset?.id || '',
-      locationId: location?.id || '',
-      priority: createForm.priority,
-      status: 'open',
-      assigneeId: assigneeUser?.id || '',
-      createdBy: currentUser?.id || assigneeUser?.id || 'system',
-      createdAt: new Date().toISOString(),
-      dueDate: createForm.dueDate ? new Date(createForm.dueDate).toISOString() : undefined,
-      startDate: createForm.startDate ? new Date(createForm.startDate).toISOString() : undefined,
-      estimatedDuration: estimatedDuration || undefined,
+      estimated_time_hours: Number.isFinite(hours) ? hours : 0,
+      estimated_time_minutes: Number.isFinite(minutes) ? minutes : 0,
+      due_date: createForm.dueDate || null,
+      start_date: createForm.startDate || null,
       recurrence: createForm.recurrence,
-      recurrenceIntervalWeeks: createForm.recurrence === 'weekly' ? recurrenceIntervalWeeks : undefined,
-      recurrenceDays: (createForm.recurrence === 'daily' || createForm.recurrence === 'weekly') ? (createForm.recurrenceDays || []) : undefined,
-      recurrenceIntervalMonths: (createForm.recurrence === 'monthly_by_date' || createForm.recurrence === 'monthly_by_weekday') ? recurrenceIntervalMonths : undefined,
-      recurrenceDayOfMonth: createForm.recurrence === 'monthly_by_date' ? recurrenceDayOfMonth : undefined,
-      recurrenceWeekOfMonth: createForm.recurrence === 'monthly_by_weekday' ? recurrenceWeekOfMonth : undefined,
-      recurrenceWeekday: createForm.recurrence === 'monthly_by_weekday' ? recurrenceWeekday : undefined,
-      recurrenceIntervalYears: createForm.recurrence === 'yearly' ? recurrenceIntervalYears : undefined,
-      recurrenceYearlyMonth: createForm.recurrence === 'yearly' ? recurrenceYearlyMonth : undefined,
-      recurrenceYearlyDay: createForm.recurrence === 'yearly' ? recurrenceYearlyDay : undefined,
-      workType: createForm.workType,
-      attachments: createForm.attachments || [],
-    });
+      work_type: createForm.workType,
+      priority: createForm.priority,
+      location: location?.name || locationName,
+      team_id: teamId ? parseInt(teamId, 10) : null,
+      asset_id: assetId ? parseInt(assetId, 10) : null,
+      procedure_id: createForm.procedure ? parseInt(String(createForm.procedure), 10) : null,
+      category_id: createForm.categoryId ? parseInt(String(createForm.categoryId), 10) : null,
+      vendor_id: createForm.vendorId ? parseInt(String(createForm.vendorId), 10) : null,
+    };
 
-    setShowCreateModal(false);
-    resetCreateForm();
-    setActiveTab('todo');
-    setSelectedWorkOrderId(created.id);
+    setSaving(true);
+    setError('');
+    try {
+      if (workOrderMode === 'create') {
+        const res = await axios.post(`${API_BASE_URL}/work-orders`, apiPayload, {
+          headers: {
+            accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+        });
+        const createdApi = res?.data;
+        await fetchWorkOrders();
+        setShowCreateModal(false);
+        resetCreateForm();
+        setWorkOrderMode('create');
+        setEditingWorkOrderId(null);
+        setActiveTab('todo');
+        if (createdApi?.id !== undefined && createdApi?.id !== null) {
+          setSelectedWorkOrderId(String(createdApi.id));
+        }
+      } else {
+        await axios.patch(
+          `${API_BASE_URL}/work-orders/${editingWorkOrderId}`,
+          apiPayload,
+          {
+            headers: {
+              accept: 'application/json',
+              'Content-Type': 'application/json',
+            },
+          },
+        );
+        await fetchWorkOrders();
+        setShowCreateModal(false);
+        resetCreateForm();
+        setWorkOrderMode('create');
+        setEditingWorkOrderId(null);
+      }
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || (workOrderMode === 'create' ? 'Failed to create work order' : 'Failed to update work order'));
+    } finally {
+      setSaving(false);
+    }
   };
+
+  const handleDeleteWorkOrder = async (id) => {
+    const ok = window.confirm('Delete this work order?');
+    if (!ok) return;
+    setError('');
+    try {
+      await axios.delete(`${API_BASE_URL}/work-orders/${id}`, {
+        headers: { accept: '*/*' },
+      });
+      setSelectedWorkOrderId(null);
+      await fetchWorkOrders();
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to delete work order');
+    }
+  };
+
+  
 
   return (
     <div className="space-y-4">
@@ -573,12 +864,25 @@ const WorkOrders = () => {
               className="w-72 pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 text-sm bg-white"
             />
           </div>
-          <Button onClick={() => { resetCreateForm(); setShowCreateModal(true); }}>
+          <Button onClick={openCreateWorkOrder}>
             <Plus className="w-4 h-4 mr-2" />
             New Work Order
           </Button>
         </div>
       </div>
+
+      {error ? (
+        <div className="p-4 rounded-md border border-red-200 bg-red-50 text-red-700 text-sm flex items-center justify-between">
+          <div>{error}</div>
+          <button
+            type="button"
+            onClick={() => fetchWorkOrders()}
+            className="text-sm font-medium text-red-700 hover:text-red-800"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
 
       {/* Mobile search */}
       <div className="md:hidden">
@@ -849,7 +1153,7 @@ const WorkOrders = () => {
                         onClick={() => { setFilters((p) => ({ ...p, asset: a.id })); setOpenFilter(''); }}
                         className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                       >
-                        {a.name}
+                        {a.asset_name || a.name}
                       </button>
                     ))}
                   </div>
@@ -1013,7 +1317,9 @@ const WorkOrders = () => {
           </div>
 
           <div className="max-h-[65vh] overflow-y-auto">
-            {filteredWorkOrders.length === 0 ? (
+            {loading ? (
+              <div className="p-6 text-sm text-gray-600">Loading work orders…</div>
+            ) : filteredWorkOrders.length === 0 ? (
               <div className="p-8 text-center">
                 <div className="mx-auto w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">
                   <Plus className="w-5 h-5" />
@@ -1084,6 +1390,12 @@ const WorkOrders = () => {
                 </div>
 
                 <div className="shrink-0 flex items-center gap-2">
+                  <Button variant="secondary" onClick={() => openEditWorkOrder(selectedWorkOrder)}>
+                    Edit
+                  </Button>
+                  <Button variant="secondary" onClick={() => handleDeleteWorkOrder(selectedWorkOrder.id)}>
+                    Delete
+                  </Button>
                   {selectedWorkOrder.status === 'open' && (
                     <Button onClick={() => handleStatusChange(selectedWorkOrder.id, 'in_progress')}>
                       Start Work
@@ -1101,6 +1413,10 @@ const WorkOrders = () => {
                 <div>
                   <div className="text-xs font-medium text-gray-500">Asset</div>
                   <div className="text-sm text-gray-900 mt-1">{getAssetName(selectedWorkOrder.assetId)}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-gray-500">Team</div>
+                  <div className="text-sm text-gray-900 mt-1">{getTeamName(selectedWorkOrder.teamId) || '—'}</div>
                 </div>
                 <div>
                   <div className="text-xs font-medium text-gray-500">Location</div>
@@ -1176,8 +1492,8 @@ const WorkOrders = () => {
       {/* Create Work Order Modal */}
       <Modal
         isOpen={showCreateModal}
-        onClose={() => { setShowCreateModal(false); resetCreateForm(); }}
-        title="New Work Order"
+        onClose={() => { setShowCreateModal(false); resetCreateForm(); setWorkOrderMode('create'); setEditingWorkOrderId(null); }}
+        title={workOrderMode === 'edit' ? 'Edit Work Order' : 'New Work Order'}
         size="xl"
       >
         <div className="space-y-6">
@@ -1280,27 +1596,63 @@ const WorkOrders = () => {
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
                 placeholder="Start typing..."
               />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Asset
-              </label>
-              <input
-                type="text"
-                value={createForm.assetName}
-                onChange={(e) => setCreateForm((p) => ({ ...p, assetName: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
-                placeholder="Start typing..."
-              />
               <button
                 type="button"
-                onClick={() => { setShowAssetsModal(true); setAssetSearch(''); }}
+                onClick={handleAddNewLocation}
                 className="mt-2 inline-flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700"
               >
                 <span className="text-lg leading-none">+</span>
-                Add multiple assets
+                Add new location
               </button>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Asset</label>
+              <div className="relative">
+                <select
+                  value={createForm.assetId}
+                  onChange={(e) => {
+                    const nextId = e.target.value;
+                    setCreateForm((p) => ({
+                      ...p,
+                      assetId: nextId,
+                      assetName: nextId ? (getAssetName(nextId) || '') : '',
+                    }));
+                  }}
+                  className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                >
+                  <option value="">Select Asset</option>
+                  {assets.map((a) => (
+                    <option key={a.id} value={a.id}>{a.asset_name || a.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+              <button
+                type="button"
+                onClick={() => { setShowAddAssetModal(true); resetNewAssetForm(); }}
+                className="mt-2 inline-flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700"
+              >
+                <span className="text-lg leading-none">+</span>
+                Add new asset
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Team</label>
+            <div className="relative">
+              <select
+                value={createForm.teamId}
+                onChange={(e) => setCreateForm((p) => ({ ...p, teamId: e.target.value }))}
+                className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+              >
+                <option value="">Select Team</option>
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>{t.team_name}</option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             </div>
           </div>
 
@@ -1786,10 +2138,226 @@ const WorkOrders = () => {
           </div>
 
           <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" onClick={() => { setShowCreateModal(false); resetCreateForm(); }}>
+            <Button variant="secondary" onClick={() => { setShowCreateModal(false); resetCreateForm(); setWorkOrderMode('create'); setEditingWorkOrderId(null); }}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} disabled={!createForm.title.trim()}>
+            <Button onClick={handleSaveWorkOrder} disabled={!createForm.title.trim() || saving || (workOrderMode === 'edit' && !editingWorkOrderId)}>
+              {saving ? (workOrderMode === 'edit' ? 'Saving…' : 'Creating…') : (workOrderMode === 'edit' ? 'Save' : 'Create')}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showLocationModal}
+        onClose={() => { setShowLocationModal(false); resetLocationForm(); }}
+        title="New Location"
+        size="xl"
+      >
+        <div className="space-y-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Location Name</label>
+            <input
+              value={locationForm.name}
+              onChange={(e) => setLocationForm((p) => ({ ...p, name: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+              placeholder="Enter Location Name"
+            />
+          </div>
+
+          <div>
+            <input
+              key={locationPicturesInputKey}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addLocationPictures(e.target.files);
+                e.target.value = '';
+              }}
+              id="location-pictures-input"
+            />
+
+            <div
+              className={`w-full rounded-md border-2 border-dashed p-6 transition-colors ${isDraggingLocationPictures ? 'border-primary-500 bg-primary-50' : 'border-gray-300 bg-gray-50'}`}
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingLocationPictures(true); }}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingLocationPictures(true); }}
+              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingLocationPictures(false); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDraggingLocationPictures(false);
+                addLocationPictures(e.dataTransfer.files);
+              }}
+            >
+              <div className="flex flex-col items-center text-center gap-2">
+                <div className="text-sm text-gray-700">Add or drag pictures</div>
+                <button
+                  type="button"
+                  onClick={() => document.getElementById('location-pictures-input')?.click()}
+                  className="text-sm font-medium text-primary-600 hover:text-primary-700"
+                >
+                  Choose pictures
+                </button>
+                <div className="text-xs text-gray-500">PNG, JPG, GIF</div>
+              </div>
+            </div>
+
+            {Array.isArray(locationForm.pictures) && locationForm.pictures.length > 0 ? (
+              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+                {locationForm.pictures.map((p) => (
+                  <div key={p.id} className="relative border border-gray-200 rounded-md overflow-hidden bg-white">
+                    <button
+                      type="button"
+                      onClick={() => removeLocationPicture(p.id)}
+                      className="absolute top-1 right-1 h-7 w-7 rounded-full bg-white/90 border border-gray-200 flex items-center justify-center hover:bg-white"
+                      aria-label="Remove"
+                      title="Remove"
+                    >
+                      <X className="h-4 w-4 text-gray-600" />
+                    </button>
+                    <img src={p.dataUrl} alt={p.name} className="h-24 w-full object-cover" />
+                    <div className="px-2 py-1 text-xs text-gray-700 truncate" title={p.name}>{p.name}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+            <input
+              value={locationForm.address}
+              onChange={(e) => setLocationForm((p) => ({ ...p, address: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+              placeholder="Enter address"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea
+              rows={3}
+              value={locationForm.description}
+              onChange={(e) => setLocationForm((p) => ({ ...p, description: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+              placeholder="Add a description"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Teams in Charge</label>
+            <div className="border border-gray-200 rounded-md p-3 bg-white">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {teams.map((t) => {
+                  const checked = (locationForm.teamsInCharge || []).includes(String(t.id));
+                  return (
+                    <label key={t.id} className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const id = String(t.id);
+                          setLocationForm((p) => {
+                            const cur = Array.isArray(p.teamsInCharge) ? p.teamsInCharge : [];
+                            const next = e.target.checked ? [...cur, id] : cur.filter((x) => x !== id);
+                            return { ...p, teamsInCharge: next };
+                          });
+                        }}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      {t.team_name}
+                    </label>
+                  );
+                })}
+              </div>
+              {teams.length === 0 ? (
+                <div className="text-xs text-gray-500">No teams loaded</div>
+              ) : null}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">QR Code/Barcode</label>
+            <input
+              value={locationForm.barcode}
+              onChange={(e) => setLocationForm((p) => ({ ...p, barcode: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+              placeholder=""
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Files</label>
+            <input
+              key={locationFilesInputKey}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addLocationFiles(e.target.files);
+                e.target.value = '';
+              }}
+              id="location-files-input"
+            />
+            <Button variant="secondary" onClick={() => document.getElementById('location-files-input')?.click()}>
+              Attach files
+            </Button>
+
+            {Array.isArray(locationForm.files) && locationForm.files.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {locationForm.files.map((f) => (
+                  <div key={f.id} className="flex items-center justify-between gap-3 px-3 py-2 border border-gray-200 rounded-md">
+                    <div className="min-w-0">
+                      <div className="text-sm text-gray-900 truncate">{f.name}</div>
+                      <div className="text-xs text-gray-500">{Math.round((f.size || 0) / 1024)} KB</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeLocationFile(f.id)}
+                      className="text-sm text-red-600 hover:text-red-700"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Vendors</label>
+            <input
+              value={locationForm.vendors}
+              onChange={(e) => setLocationForm((p) => ({ ...p, vendors: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+              placeholder="Start typing..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Parent Location</label>
+            <div className="relative">
+              <select
+                value={locationForm.parentId}
+                onChange={(e) => setLocationForm((p) => ({ ...p, parentId: e.target.value }))}
+                className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md bg-white focus:ring-primary-500 focus:border-primary-500"
+              >
+                <option value="">None</option>
+                {(Array.isArray(locations) ? locations : []).map((l) => (
+                  <option key={l.id} value={l.id}>{l.name}</option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => { setShowLocationModal(false); resetLocationForm(); }}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateLocationFromModal} disabled={!String(locationForm.name || '').trim()}>
               Create
             </Button>
           </div>
@@ -2032,15 +2600,15 @@ const WorkOrders = () => {
           <div>
             <button
               type="button"
-              onClick={() => setNewProcedureForm((p) => ({ ...p, description: p.description || '' }))}
+              onClick={() => setNewProcedureForm((p) => ({ ...p, description: '' }))}
               className="text-sm text-primary-600 hover:text-primary-700"
             >
               + Add Description
             </button>
-            {newProcedureForm.description !== '' && (
+            {newProcedureForm.description !== null && (
               <textarea
                 rows={3}
-                value={newProcedureForm.description}
+                value={newProcedureForm.description || ''}
                 onChange={(e) => setNewProcedureForm((p) => ({ ...p, description: e.target.value }))}
                 className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
                 placeholder="Description"

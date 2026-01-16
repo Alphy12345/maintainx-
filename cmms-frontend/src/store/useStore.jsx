@@ -16,6 +16,17 @@ import {
   mockNotifications 
 } from '../data/mockData.js';
 
+const getInitialDarkMode = () => {
+  try {
+    const saved = localStorage.getItem('theme');
+    if (saved === 'dark') return true;
+    if (saved === 'light') return false;
+  } catch {
+    // ignore
+  }
+  return false;
+};
+
 const useStore = create((set, get) => ({
   // Data
   users: mockUsers,
@@ -35,12 +46,29 @@ const useStore = create((set, get) => ({
 
   // UI State
   sidebarOpen: true,
-  darkMode: false,
+  darkMode: getInitialDarkMode(),
   currentUser: null,
 
   // Actions
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
-  toggleDarkMode: () => set((state) => ({ darkMode: !state.darkMode })),
+  toggleDarkMode: () => set((state) => {
+    const next = !state.darkMode;
+    try {
+      localStorage.setItem('theme', next ? 'dark' : 'light');
+    } catch {
+      // ignore
+    }
+    return { darkMode: next };
+  }),
+  setDarkMode: (enabled) => set(() => {
+    const next = !!enabled;
+    try {
+      localStorage.setItem('theme', next ? 'dark' : 'light');
+    } catch {
+      // ignore
+    }
+    return { darkMode: next };
+  }),
   setCurrentUser: (user) => set({ currentUser: user }),
 
   // Work Order Actions
@@ -181,6 +209,12 @@ const useStore = create((set, get) => ({
       type: location?.type || 'site',
       parentId: location?.parentId,
       address: location?.address,
+      description: location?.description,
+      teamsInCharge: location?.teamsInCharge,
+      barcode: location?.barcode,
+      vendors: location?.vendors,
+      pictures: location?.pictures,
+      files: location?.files,
     };
     set((state) => ({ locations: [...state.locations, next] }));
     return next;
