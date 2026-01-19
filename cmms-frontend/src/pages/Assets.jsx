@@ -27,6 +27,7 @@ const Assets = () => {
     name: '',
     locationId: '',
     criticality: '',
+    status: 'running',
     description: '',
     year: '',
     manufacturer: '',
@@ -153,7 +154,7 @@ const Assets = () => {
         year: a.year,
         assetType: a.asset_type,
         vendorId: a.vendor_id,
-        status: 'running',
+        status: (a.status || a.asset_status || a.state || 'running'),
       }));
       setAssets(mapped);
     } catch (e) {
@@ -268,6 +269,7 @@ const Assets = () => {
       name: '',
       locationId: '',
       criticality: '',
+      status: 'running',
       description: '',
       year: '',
       manufacturer: '',
@@ -298,6 +300,7 @@ const Assets = () => {
       name: asset.name || '',
       locationId: asset.locationId ? String(asset.locationId) : '',
       criticality: asset.criticality ? String(asset.criticality) : '',
+      status: asset.status ? String(asset.status) : 'running',
       description: asset.description ? String(asset.description) : '',
       year: asset.year ? String(asset.year) : '',
       manufacturer: asset.manufacturer ? String(asset.manufacturer) : '',
@@ -328,6 +331,7 @@ const Assets = () => {
         asset_name: assetName,
         location: location === 'Unknown Location' ? '' : location,
         criticality: String(createForm.criticality || ''),
+        status: String(createForm.status || 'running'),
         description: String(createForm.description || ''),
         manufacturer: String(createForm.manufacturer || ''),
         model: String(createForm.model || ''),
@@ -680,6 +684,22 @@ const Assets = () => {
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
                   <option value="critical">Critical</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <div className="relative">
+                <select
+                  value={createForm.status}
+                  onChange={(e) => setCreateForm((p) => ({ ...p, status: e.target.value }))}
+                  className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md bg-white focus:ring-primary-500 focus:border-primary-500"
+                >
+                  <option value="running">Running</option>
+                  <option value="down">Down</option>
+                  <option value="maintenance">Maintenance</option>
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               </div>

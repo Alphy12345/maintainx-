@@ -6,11 +6,35 @@ import useStore from '../store/useStore';
 
 const API_BASE_URL = 'http://172.18.100.33:8000';
 
+const normalizeStatus = (raw) => {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return 'open';
+  if (s === 'on hold' || s === 'onhold' || s === 'hold' || s === 'paused') return 'on_hold';
+  if (s === 'on_hold') return 'on_hold';
+  if (s === 'in progress' || s === 'inprogress' || s === 'in-progress') return 'in_progress';
+  if (s === 'in_progress') return 'in_progress';
+  if (s === 'done' || s === 'complete' || s === 'completed') return 'completed';
+  if (s === 'cancelled' || s === 'canceled') return 'cancelled';
+  if (s === 'open') return 'open';
+  return s;
+};
+
+const toApiStatus = (uiStatus) => {
+  const s = normalizeStatus(uiStatus);
+  if (s === 'on_hold') return 'on hold';
+  if (s === 'in_progress') return 'in progress';
+  if (s === 'completed') return 'done';
+  return 'open';
+};
+
 const WorkOrders = () => {
-  const { locations, users, inventory, procedures, currentUser, addUser, addLocation, addAsset, addProcedure } = useStore();
+  const { locations, users, currentUser, addUser, addLocation, addAsset, addProcedure } = useStore();
   const [assets, setAssets] = useState([]);
   const [teams, setTeams] = useState([]);
   const [apiCategories, setApiCategories] = useState([]);
+  const [apiParts, setApiParts] = useState([]);
+  const [apiProcedures, setApiProcedures] = useState([]);
+  const [apiVendors, setApiVendors] = useState([]);
   const [workOrders, setWorkOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -140,6 +164,33 @@ const WorkOrders = () => {
     }
   };
 
+  const fetchParts = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/parts`, { headers: { accept: 'application/json' } });
+      setApiParts(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setApiParts([]);
+    }
+  };
+
+  const fetchProcedures = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/procedures`, { headers: { accept: 'application/json' } });
+      setApiProcedures(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setApiProcedures([]);
+    }
+  };
+
+  const fetchVendors = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/vendors`, { headers: { accept: 'application/json' } });
+      setApiVendors(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setApiVendors([]);
+    }
+  };
+
   const fetchWorkOrders = async () => {
     setLoading(true);
     setError('');
@@ -151,12 +202,17 @@ const WorkOrders = () => {
         const dueIso = wo.due_date ? new Date(wo.due_date).toISOString() : undefined;
         const startIso = wo.start_date ? new Date(wo.start_date).toISOString() : undefined;
 
+        const rawStatus = wo.status ?? wo.work_order_status ?? wo.workOrderStatus ?? wo.state ?? wo.work_order_state;
+        const idStr = String(wo.id);
+
         const procedureId = wo.procedure_id ?? wo.procedureId ?? wo.procedure ?? '';
-        const categoryId = wo.category_id ?? wo.categoryId ?? '';
+        const categoryFromArray = Array.isArray(wo.categories) && wo.categories.length > 0 ? wo.categories[0] : null;
+        const categoryId = (categoryFromArray?.id ?? (Array.isArray(wo.category_ids) ? wo.category_ids[0] : (wo.category_id ?? wo.categoryId ?? '')));
         const vendorId = wo.vendor_id ?? wo.vendorId ?? '';
-        const partId = wo.part_id ?? wo.partId ?? wo.part ?? '';
+        const partFromArray = Array.isArray(wo.parts) && wo.parts.length > 0 ? wo.parts[0] : null;
+        const partId = (partFromArray?.id ?? (Array.isArray(wo.part_ids) ? wo.part_ids[0] : (wo.part_id ?? wo.partId ?? wo.part ?? '')));
         return {
-          id: String(wo.id),
+          id: idStr,
           title: wo.name || '',
           description: wo.description || '',
           estimatedDuration: estimatedDuration || undefined,
@@ -172,7 +228,13 @@ const WorkOrders = () => {
           categoryId: categoryId ? String(categoryId) : '',
           vendorId: vendorId ? String(vendorId) : '',
           partId: partId ? String(partId) : '',
-          status: wo.status || 'open',
+          categoryIds: Array.isArray(wo.category_ids)
+            ? wo.category_ids.map((id) => String(id))
+            : (Array.isArray(wo.categories) ? wo.categories.map((c) => String(c?.id)).filter(Boolean) : []),
+          partIds: Array.isArray(wo.part_ids)
+            ? wo.part_ids.map((id) => String(id))
+            : (Array.isArray(wo.parts) ? wo.parts.map((p) => String(p?.id)).filter(Boolean) : []),
+          status: normalizeStatus(rawStatus),
           assigneeId: wo.assignee_id ? String(wo.assignee_id) : (wo.assigneeId ? String(wo.assigneeId) : ''),
         };
       });
@@ -188,6 +250,9 @@ const WorkOrders = () => {
     fetchAssets();
     fetchTeams();
     fetchCategories();
+    fetchParts();
+    fetchProcedures();
+    fetchVendors();
     fetchWorkOrders();
   }, []);
 
@@ -254,19 +319,17 @@ const WorkOrders = () => {
   };
 
   const getPartName = (partId) => {
-    const p = (inventory || []).find((x) => String(x.id) === String(partId));
+    const p = (apiParts || []).find((x) => String(x.id) === String(partId));
     return p?.name || '';
   };
 
   const getVendorName = (vendorId) => {
-    if (!vendorId) return '';
-    if (String(vendorId) === 'vendor-1') return 'Vendor 1';
-    if (String(vendorId) === 'vendor-2') return 'Vendor 2';
-    return '';
+    const v = (apiVendors || []).find((x) => String(x.id) === String(vendorId));
+    return v?.name || '';
   };
 
   const getProcedureName = (procedureId) => {
-    const p = (procedures || []).find((x) => x.id === procedureId);
+    const p = (apiProcedures || []).find((x) => String(x.id) === String(procedureId));
     return p?.name || '';
   };
 
@@ -401,9 +464,24 @@ const WorkOrders = () => {
     setError('');
     setSaving(true);
     try {
+      const normalized = normalizeStatus(newStatus);
+
+      const apiStatus = toApiStatus(normalized);
+
+      setWorkOrders((prev) => prev.map((wo) => (
+        String(wo.id) === String(workOrderId)
+          ? { ...wo, status: normalized }
+          : wo
+      )));
+
+      if (normalized === 'completed') {
+        setActiveTab('done');
+        setSelectedWorkOrderId(String(workOrderId));
+      }
+
       await axios.patch(
         `${API_BASE_URL}/work-orders/${workOrderId}`,
-        { status: newStatus },
+        { status: apiStatus, work_order_status: apiStatus, state: apiStatus },
         {
           headers: {
             accept: 'application/json',
@@ -414,6 +492,7 @@ const WorkOrders = () => {
       await fetchWorkOrders();
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Failed to update status');
+      await fetchWorkOrders();
     } finally {
       setSaving(false);
     }
@@ -486,7 +565,7 @@ const WorkOrders = () => {
       assetName: wo.assetId ? String(getAssetName(wo.assetId) || '') : '',
       procedure: wo.procedure ? String(wo.procedure) : '',
       teamId: wo.teamId ? String(wo.teamId) : '',
-      status: wo.status ? String(wo.status) : 'open',
+      status: normalizeStatus(wo.status),
       estimatedHours: String(hours || ''),
       estimatedMinutes: String(minutes || ''),
       dueDate: toDateInput(wo.dueDate),
@@ -845,9 +924,9 @@ const WorkOrders = () => {
       team_id: teamId ? parseInt(teamId, 10) : null,
       asset_id: assetId ? parseInt(assetId, 10) : null,
       procedure_id: hasNumericProcedureId ? numericProcedureId : null,
-      category_id: Number.isFinite(numericCategoryId) ? numericCategoryId : null,
       vendor_id: Number.isFinite(numericVendorId) ? numericVendorId : null,
-      part_id: Number.isFinite(numericPartId) ? numericPartId : null,
+      category_ids: Number.isFinite(numericCategoryId) ? [numericCategoryId] : [],
+      parts: Number.isFinite(numericPartId) ? [numericPartId] : [],
       ...(hasNumericProcedureId ? {} : (createForm.procedure ? { procedure: String(createForm.procedure) } : {})),
     };
 
@@ -909,8 +988,6 @@ const WorkOrders = () => {
       setError(e?.response?.data?.detail || e?.message || 'Failed to delete work order');
     }
   };
-
-  
 
   return (
     <div className="space-y-4">
@@ -1313,7 +1390,7 @@ const WorkOrders = () => {
                     >
                       Any
                     </button>
-                    {(inventory || []).map((p) => (
+                    {(apiParts || []).map((p) => (
                       <button
                         key={p.id}
                         type="button"
@@ -1408,18 +1485,25 @@ const WorkOrders = () => {
                       key={wo.id}
                       type="button"
                       onClick={() => setSelectedWorkOrderId(wo.id)}
-                      className={`w-full text-left px-4 py-3 hover:bg-gray-50 ${isSelected ? 'bg-primary-50' : 'bg-white'}`}
+                      className={`w-full text-left px-4 py-4 transition-colors border-l-2 ${
+                        isSelected
+                          ? 'bg-transparent border-primary-600'
+                          : 'bg-transparent border-transparent hover:bg-gray-50/10'
+                      }`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-sm font-semibold text-gray-900 truncate">
-                            {wo.title}
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="text-sm font-semibold text-gray-900 truncate">
+                              {wo.title}
+                            </div>
+                            {getStatusBadge(normalizeStatus(wo.status))}
                           </div>
                           <div className="mt-1 text-xs text-gray-500 truncate">
                             {wo.id} - {getAssetName(wo.assetId)} - {getLocationName(wo.locationId)}
                           </div>
                         </div>
-                        <div className="shrink-0 flex flex-col items-end gap-1">
+                        <div className="flex flex-col items-end gap-1">
                           {getPriorityBadge(wo.priority)}
                           <div className="text-xs text-gray-500">
                             {wo.dueDate ? new Date(wo.dueDate).toLocaleDateString() : 'No due date'}
@@ -1450,7 +1534,7 @@ const WorkOrders = () => {
                   <div className="text-xs text-gray-500">{selectedWorkOrder.id}</div>
                   <h2 className="text-xl font-bold text-gray-900 mt-1">{selectedWorkOrder.title}</h2>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    {getStatusBadge(selectedWorkOrder.status)}
+                    {getStatusBadge(normalizeStatus(selectedWorkOrder.status))}
                     {getPriorityBadge(selectedWorkOrder.priority)}
                   </div>
                 </div>
@@ -1462,16 +1546,36 @@ const WorkOrders = () => {
                   <Button variant="secondary" onClick={() => handleDeleteWorkOrder(selectedWorkOrder.id)}>
                     Delete
                   </Button>
-                  {selectedWorkOrder.status === 'open' && (
-                    <Button onClick={() => handleStatusChange(selectedWorkOrder.id, 'in_progress')}>
-                      Start Work
-                    </Button>
-                  )}
-                  {selectedWorkOrder.status === 'in_progress' && (
-                    <Button onClick={() => handleStatusChange(selectedWorkOrder.id, 'completed')}>
-                      Complete
-                    </Button>
-                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-medium text-gray-500">Status</div>
+                <div className="mt-2 grid grid-cols-3 gap-2 max-w-[520px]">
+                  {[
+                    { key: 'on_hold', label: 'On Hold', Icon: PauseCircle },
+                    { key: 'in_progress', label: 'In Progress', Icon: RefreshCw },
+                    { key: 'completed', label: 'Done', Icon: Check },
+                  ].map((s) => {
+                    const active = normalizeStatus(selectedWorkOrder.status) === s.key;
+                    const Icon = s.Icon;
+                    return (
+                      <button
+                        key={s.key}
+                        type="button"
+                        disabled={saving}
+                        onClick={() => handleStatusChange(selectedWorkOrder.id, s.key)}
+                        className={`flex flex-col items-center justify-center gap-1 rounded-md border px-3 py-3 text-xs font-medium transition-colors ${
+                          active
+                            ? 'bg-primary-600 border-primary-600 text-white'
+                            : 'bg-transparent border-gray-300 text-primary-700 hover:bg-gray-50/10'
+                        } ${saving ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {s.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1481,7 +1585,7 @@ const WorkOrders = () => {
                   <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
                     <div>
                       <dt className="text-xs font-medium text-gray-500">Status</dt>
-                      <dd className="text-sm text-gray-900 mt-1">{String(selectedWorkOrder.status || 'open')}</dd>
+                      <dd className="text-sm text-gray-900 mt-1">{String(normalizeStatus(selectedWorkOrder.status))}</dd>
                     </div>
                     <div>
                       <dt className="text-xs font-medium text-gray-500">Priority</dt>
@@ -2124,36 +2228,6 @@ const WorkOrders = () => {
                 <option value="reactive">Reactive</option>
                 <option value="preventive">Preventive</option>
               </select>
-
-              <div className="mt-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {[
-                    { key: 'open', label: 'Open', Icon: Lock },
-                    { key: 'on_hold', label: 'On Hold', Icon: PauseCircle },
-                    { key: 'in_progress', label: 'In Progress', Icon: RefreshCw },
-                    { key: 'completed', label: 'Done', Icon: Check },
-                  ].map((s) => {
-                    const active = (createForm.status || 'open') === s.key;
-                    const Icon = s.Icon;
-                    return (
-                      <button
-                        key={s.key}
-                        type="button"
-                        onClick={() => setCreateForm((p) => ({ ...p, status: s.key }))}
-                        className={`flex flex-col items-center justify-center gap-1 rounded-md border px-2 py-2 text-xs font-medium transition-colors ${
-                          active
-                            ? 'bg-primary-600 border-primary-600 text-white'
-                            : 'bg-white border-gray-300 text-primary-700 hover:bg-gray-50'
-                        }`}
-                      >
-                        <Icon className="h-4 w-4" />
-                        {s.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
             </div>
           </div>
 
@@ -2188,7 +2262,7 @@ const WorkOrders = () => {
                   className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
                 >
                   <option value="">Start typing...</option>
-                  {(inventory || []).map((p) => (
+                  {(apiParts || []).map((p) => (
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
@@ -2230,8 +2304,9 @@ const WorkOrders = () => {
                   className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
                 >
                   <option value="">Start typing...</option>
-                  <option value="vendor-1">Vendor 1</option>
-                  <option value="vendor-2">Vendor 2</option>
+                  {(apiVendors || []).map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               </div>
@@ -2624,7 +2699,7 @@ const WorkOrders = () => {
             </button>
           </div>
 
-          {(procedures || []).length === 0 ? (
+          {(apiProcedures || []).length === 0 ? (
             <div className="border border-gray-200 rounded-md p-10 bg-white text-center">
               <div className="mx-auto h-14 w-14 rounded-2xl bg-primary-50 flex items-center justify-center">
                 <ListChecks className="h-7 w-7 text-primary-600" />
@@ -2637,21 +2712,21 @@ const WorkOrders = () => {
           ) : (
             <div className="border border-gray-200 rounded-md overflow-hidden">
               <div className="max-h-80 overflow-y-auto divide-y divide-gray-100">
-                {(procedures || [])
+                {(apiProcedures || [])
                   .filter((p) => (p?.name || '').toLowerCase().includes(procedureSearch.toLowerCase()))
                   .map((p) => {
-                    const selected = selectedProcedureId === p.id;
+                    const selected = String(selectedProcedureId) === String(p.id);
                     return (
                       <button
                         key={p.id}
                         type="button"
                         onClick={() => setSelectedProcedureId(p.id)}
-                        className={`w-full text-left px-3 py-3 text-sm hover:bg-gray-50 ${selected ? 'bg-primary-50' : 'bg-white'}`}
+                        className={`w-full text-left px-3 py-3 text-sm transition-colors ${selected ? 'bg-transparent border-l-4 border-primary-500' : 'bg-transparent border-l-4 border-transparent'} hover:bg-gray-50/10`}
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0">
                             <div className="font-medium text-gray-900 truncate">{p.name}</div>
-                            <div className="text-xs text-gray-500 truncate">{(p.fields || []).length} fields</div>
+                            <div className="text-xs text-gray-500 truncate">{p.description || '—'}</div>
                           </div>
                           <div className={`h-4 w-4 rounded border ${selected ? 'bg-primary-600 border-primary-600' : 'bg-white border-gray-300'}`} />
                         </div>
@@ -2673,7 +2748,7 @@ const WorkOrders = () => {
                 setShowProcedureModal(false);
                 setProcedureSearch('');
               }}
-              disabled={!selectedProcedureId || (procedures || []).length === 0}
+              disabled={!selectedProcedureId || (apiProcedures || []).length === 0}
             >
               Add Procedure
             </Button>

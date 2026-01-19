@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   LineChart,
   Line,
@@ -13,10 +13,28 @@ import {
   CartesianGrid,
   Tooltip,
 } from 'recharts';
-import { Calendar, ChevronDown, Download, Plus, Filter, Inbox, Package, MapPin, AlertTriangle, CircleDot, Zap, MessageSquare } from 'lucide-react';
+import { Calendar, ChevronDown, Download, Plus, Filter } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Card, CardBody, CardHeader, Modal, Table, Badge } from '../components';
 import useStore from '../store/useStore';
+import axios from 'axios';
+
+const API_BASE_URL = 'http://172.18.100.33:8000';
+
+const EXPORT_SECTIONS = ['work_orders', 'assets', 'asset_status', 'parts', 'part_transactions', 'vendors'];
+
+const normalizeWorkOrderStatus = (raw) => {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return 'open';
+  if (s === 'on hold' || s === 'onhold' || s === 'hold' || s === 'paused') return 'on_hold';
+  if (s === 'on_hold') return 'on_hold';
+  if (s === 'in progress' || s === 'inprogress' || s === 'in-progress') return 'in_progress';
+  if (s === 'in_progress') return 'in_progress';
+  if (s === 'done' || s === 'complete' || s === 'completed') return 'completed';
+  if (s === 'cancelled' || s === 'canceled') return 'cancelled';
+  if (s === 'open') return 'open';
+  return s;
+};
 
 const datePresets = [
   { id: 'today', label: 'Today', days: 0 },
@@ -26,12 +44,8 @@ const datePresets = [
 
 const tabs = [
   { id: 'work_orders', label: 'Work Orders' },
-  { id: 'asset_health', label: 'Asset Health' },
   { id: 'reporting_details', label: 'Reporting Details' },
-  { id: 'recent_activity', label: 'Recent Activity' },
   { id: 'export_data', label: 'Export Data' },
-  { id: 'custom_dashboards', label: 'Custom Dashboards' },
-  { id: 'requests', label: 'Requests' },
 ];
 
 const formatInputDate = (d) => {
@@ -53,7 +67,11 @@ const Gauge = ({ label, valueText }) => (
 
 const Reporting = () => {
   const navigate = useNavigate();
-  const { workOrders, assets, locations, users, requests, assetHealthEvents, activities, inventory } = useStore();
+  const { assets, locations, users, assetHealthEvents, inventory } = useStore();
+
+  const [apiWorkOrders, setApiWorkOrders] = useState([]);
+  const [loadingWorkOrders, setLoadingWorkOrders] = useState(false);
+  const [workOrdersError, setWorkOrdersError] = useState('');
 
   const [activeTab, setActiveTab] = useState('work_orders');
   const [reportingGroupBy, setReportingGroupBy] = useState('user');
@@ -79,15 +97,60 @@ const Reporting = () => {
   });
 
   const [filters, setFilters] = useState({ assignedTo: '', dueDate: '', locationId: '', priority: '' });
-  const [requestFilters, setRequestFilters] = useState({ assetId: '', locationId: '', priority: '', status: '' });
   const [showAddFilter, setShowAddFilter] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showPresets, setShowPresets] = useState(false);
-  const [showComments, setShowComments] = useState(true);
-  const [showAllUpdates, setShowAllUpdates] = useState(true);
+
+  useEffect(() => {
+    if (!EXPORT_SECTIONS.includes(exportSection)) {
+      setExportSection('work_orders');
+    }
+  }, [exportSection]);
 
   const startDate = useMemo(() => new Date(`${dateRange.start}T00:00:00`), [dateRange.start]);
   const endDate = useMemo(() => new Date(`${dateRange.end}T23:59:59`), [dateRange.end]);
+
+  useEffect(() => {
+    const fetchWorkOrders = async () => {
+      setLoadingWorkOrders(true);
+      setWorkOrdersError('');
+      try {
+        const res = await axios.get(`${API_BASE_URL}/work-orders`, { headers: { accept: 'application/json' } });
+        const rows = Array.isArray(res.data) ? res.data : [];
+        const mapped = rows.map((wo) => {
+          const dueIso = wo?.due_date ? new Date(wo.due_date).toISOString() : null;
+          const startIso = wo?.start_date ? new Date(wo.start_date).toISOString() : null;
+          const createdIso = startIso || dueIso || null;
+          return {
+            id: String(wo?.id ?? ''),
+            title: String(wo?.name ?? ''),
+            description: String(wo?.description ?? ''),
+            createdAt: createdIso,
+            startDate: startIso,
+            dueDate: dueIso,
+            status: normalizeWorkOrderStatus(wo?.status),
+            priority: String(wo?.priority ?? 'low'),
+            workType: String(wo?.work_type ?? ''),
+            locationId: typeof wo?.location === 'string' ? wo.location : (wo?.location ? String(wo.location) : ''),
+            teamId: wo?.team_id !== undefined && wo?.team_id !== null ? String(wo.team_id) : '',
+            assetId: wo?.asset_id !== undefined && wo?.asset_id !== null ? String(wo.asset_id) : '',
+            vendorId: wo?.vendor_id !== undefined && wo?.vendor_id !== null ? String(wo.vendor_id) : '',
+            procedureId: wo?.procedure_id !== undefined && wo?.procedure_id !== null ? String(wo.procedure_id) : '',
+            recurrence: String(wo?.recurrence ?? 'does_not_repeat'),
+            assigneeId: wo?.assignee_id !== undefined && wo?.assignee_id !== null ? String(wo.assignee_id) : '',
+          };
+        });
+        setApiWorkOrders(mapped);
+      } catch (e) {
+        setWorkOrdersError(e?.response?.data?.detail || e?.message || 'Failed to load work orders');
+        setApiWorkOrders([]);
+      } finally {
+        setLoadingWorkOrders(false);
+      }
+    };
+
+    fetchWorkOrders();
+  }, []);
 
   const exportDateRangeText = useMemo(() => {
     const s = exportForm.start || dateRange.start;
@@ -190,7 +253,7 @@ const Reporting = () => {
     const userName = (id) => users.find((u) => u.id === id)?.name || '';
 
     if (exportSection === 'work_orders') {
-      const list = (workOrders || []).filter((wo) => exportInRange(wo.createdAt));
+      const list = (apiWorkOrders || []).filter((wo) => exportInRange(wo.createdAt));
       const filtered = list.filter((wo) => {
         if (wo.status === 'completed') return exportForm.includeCompleted;
         if (wo.dueDate && exportInRange(wo.dueDate)) return exportForm.includeDue;
@@ -232,14 +295,6 @@ const Reporting = () => {
       }));
     }
 
-    if (exportSection === 'locations') {
-      return (locations || []).map((l) => ({
-        ID: l.id,
-        Name: l.name,
-        Address: l.address || '',
-      }));
-    }
-
     if (exportSection === 'parts') {
       const list = (inventory || []);
       const filtered = exportForm.includeOnlyRestock
@@ -258,14 +313,6 @@ const Reporting = () => {
       return [];
     }
 
-    if (exportSection === 'meters') {
-      return [];
-    }
-
-    if (exportSection === 'meter_reading') {
-      return [];
-    }
-
     if (exportSection === 'vendors') {
       const vendorNames = new Set();
       for (const a of (assets || [])) {
@@ -278,27 +325,6 @@ const Reporting = () => {
       }));
     }
 
-    if (exportSection === 'requests') {
-      const list = (requests || []).filter((r) => exportInRange(r.createdAt));
-      return list.map((r) => ({
-        ID: r.id,
-        Title: r.title,
-        Status: r.status,
-        Priority: r.priority,
-        Asset: assetName(r.assetId),
-        Location: locationName(r.locationId),
-        CreatedAt: r.createdAt ? new Date(r.createdAt).toLocaleString() : '',
-      }));
-    }
-
-    if (exportSection === 'time_cost') {
-      return [];
-    }
-
-    if (exportSection === 'labor_utilization') {
-      return [];
-    }
-
     return [];
   };
 
@@ -308,15 +334,9 @@ const Reporting = () => {
       work_orders: 'Work Orders',
       assets: 'Assets',
       asset_status: 'Asset Status',
-      locations: 'Locations',
       parts: 'Parts',
       part_transactions: 'Part Transactions',
-      meters: 'Meters',
-      meter_reading: 'Meter Reading',
       vendors: 'Vendors',
-      requests: 'Requests',
-      time_cost: 'Time & Cost Tracking',
-      labor_utilization: 'Labor Utilization',
     };
     const title = titleMap[exportSection] || 'Export';
 
@@ -328,175 +348,16 @@ const Reporting = () => {
     downloadCsv(`export-${exportSection}-${(exportForm.start || dateRange.start)}_${(exportForm.end || dateRange.end)}`, rows);
   };
 
-  const assetHealthDerived = useMemo(() => {
-    const windowStart = startDate;
-    const windowEnd = endDate;
-    const totalWindowMs = Math.max(windowEnd.getTime() - windowStart.getTime(), 0);
-
-    const toMs = (iso) => {
-      const d = new Date(iso);
-      const t = d.getTime();
-      return Number.isNaN(t) ? null : t;
-    };
-
-    const statusIsDown = (status) => status === 'down';
-
-    const safeEvents = (assetHealthEvents || [])
-      .map((e) => ({ ...e, _t: toMs(e.timestamp) }))
-      .filter((e) => e.assetId && e._t !== null)
-      .sort((a, b) => a._t - b._t);
-
-    const byAsset = new Map();
-    for (const e of safeEvents) {
-      if (!byAsset.has(e.assetId)) byAsset.set(e.assetId, []);
-      byAsset.get(e.assetId).push(e);
-    }
-
-    const perAsset = (assets || []).map((asset) => {
-      const list = byAsset.get(asset.id) || [];
-
-      const before = list.filter((e) => e._t < windowStart.getTime());
-      const within = list.filter((e) => e._t >= windowStart.getTime() && e._t <= windowEnd.getTime());
-      const currentAtStart = before.length ? (before[before.length - 1].status || asset.status) : asset.status;
-      let cursorStatus = currentAtStart || 'running';
-      let cursorDowntimeType = (before.length ? (before[before.length - 1].downtimeType) : undefined) || undefined;
-      let cursorTime = windowStart.getTime();
-
-      let downMs = 0;
-      let plannedDownMs = 0;
-      let unplannedDownMs = 0;
-      const downIntervals = [];
-      let activeDownStart = statusIsDown(cursorStatus) ? cursorTime : null;
-      let activeDownType = statusIsDown(cursorStatus) ? cursorDowntimeType : null;
-
-      const closeDown = (endTime) => {
-        if (activeDownStart === null) return;
-        const dur = Math.max(endTime - activeDownStart, 0);
-        downMs += dur;
-        if (activeDownType === 'planned') plannedDownMs += dur;
-        if (activeDownType === 'unplanned') unplannedDownMs += dur;
-        downIntervals.push({ start: activeDownStart, end: endTime, ms: dur, downtimeType: activeDownType || '' });
-        activeDownStart = null;
-        activeDownType = null;
-      };
-
-      for (const ev of within) {
-        const t = ev._t;
-        if (t < cursorTime) continue;
-
-        if (statusIsDown(cursorStatus) && activeDownStart === null) {
-          activeDownStart = cursorTime;
-          activeDownType = cursorDowntimeType || ev.downtimeType || null;
-        }
-
-        if (ev.status && ev.status !== cursorStatus) {
-          if (statusIsDown(cursorStatus) && !statusIsDown(ev.status)) {
-            closeDown(t);
-          }
-          if (!statusIsDown(cursorStatus) && statusIsDown(ev.status)) {
-            activeDownStart = t;
-            activeDownType = ev.downtimeType || null;
-          }
-          cursorStatus = ev.status;
-        }
-        if (ev.downtimeType) cursorDowntimeType = ev.downtimeType;
-        cursorTime = t;
-      }
-
-      if (statusIsDown(cursorStatus)) {
-        if (activeDownStart === null) {
-          activeDownStart = cursorTime;
-          activeDownType = cursorDowntimeType;
-        }
-        closeDown(windowEnd.getTime());
-      }
-
-      const availability = totalWindowMs === 0 ? 0 : Math.max(0, Math.min(1, (totalWindowMs - downMs) / totalWindowMs));
-
-      const mttrMs = downIntervals.length ? Math.round(downIntervals.reduce((s, x) => s + x.ms, 0) / downIntervals.length) : 0;
-
-      const failures = downIntervals.length;
-      const mtbfMs = failures > 0
-        ? Math.round((totalWindowMs - downMs) / failures)
-        : 0;
-
-      return {
-        assetId: asset.id,
-        assetName: asset.name,
-        locationId: asset.locationId,
-        availability,
-        downMs,
-        plannedDownMs,
-        unplannedDownMs,
-        failures,
-        mttrMs,
-        mtbfMs,
-      };
-    });
-
-    const overallAvailability = perAsset.length
-      ? perAsset.reduce((s, a) => s + a.availability, 0) / perAsset.length
-      : 0;
-
-    const onlineCount = (assets || []).filter((a) => a.status && a.status !== 'down').length;
-    const offlineCount = (assets || []).filter((a) => a.status === 'down').length;
-
-    const offlinePlannedCount = (assets || []).filter((a) => {
-      if (a.status !== 'down') return false;
-      const events = (byAsset.get(a.id) || []).filter((e) => e._t <= windowEnd.getTime());
-      const last = events.length ? events[events.length - 1] : null;
-      return last?.downtimeType === 'planned';
-    }).length;
-    const offlineUnplannedCount = (assets || []).filter((a) => {
-      if (a.status !== 'down') return false;
-      const events = (byAsset.get(a.id) || []).filter((e) => e._t <= windowEnd.getTime());
-      const last = events.length ? events[events.length - 1] : null;
-      return last?.downtimeType === 'unplanned';
-    }).length;
-
-    const mostProblematic = [...perAsset]
-      .sort((a, b) => (b.unplannedDownMs - a.unplannedDownMs) || (b.failures - a.failures))
-      .slice(0, 10)
-      .map((row) => ({
-        ...row,
-        locationName: locations.find((l) => l.id === row.locationId)?.name || '-',
-      }));
-
-    return {
-      overallAvailability,
-      onlineCount,
-      offlineCount,
-      offlinePlannedCount,
-      offlineUnplannedCount,
-      mostProblematic,
-      hasAnyEvents: (assetHealthEvents || []).length > 0,
-    };
-  }, [assets, assetHealthEvents, startDate, endDate, locations]);
-
   const inRange = (iso) => {
     if (!iso) return false;
     const d = new Date(iso);
     return d >= startDate && d <= endDate;
   };
 
-  const recentActivities = useMemo(() => {
-    const list = (activities || [])
-      .map((a) => ({
-        ...a,
-        _t: a?.timestamp ? new Date(a.timestamp).getTime() : 0,
-      }))
-      .filter((a) => a._t && !Number.isNaN(a._t))
-      .filter((a) => inRange(a.timestamp))
-      .filter((a) => (showAllUpdates ? true : a.kind === 'status_change' || a.kind === 'created'))
-      .filter((a) => (showComments ? true : a.kind !== 'comment'))
-      .sort((a, b) => b._t - a._t);
-
-    return list;
-  }, [activities, startDate, endDate, showAllUpdates, showComments]);
-
   const filteredWorkOrders = useMemo(() => {
-    return (workOrders || []).filter((wo) => {
-      if (!inRange(wo.createdAt)) return false;
+    return (apiWorkOrders || []).filter((wo) => {
+      const createdAt = wo.createdAt || wo.startDate || wo.dueDate;
+      if (!inRange(createdAt)) return false;
       if (filters.assignedTo && wo.assigneeId !== filters.assignedTo) return false;
       if (filters.locationId && wo.locationId !== filters.locationId) return false;
       if (filters.priority && wo.priority !== filters.priority) return false;
@@ -506,7 +367,7 @@ const Reporting = () => {
       }
       return true;
     });
-  }, [workOrders, filters, startDate, endDate]);
+  }, [apiWorkOrders, filters, startDate, endDate]);
 
   const derived = useMemo(() => {
     const createdCount = filteredWorkOrders.length;
@@ -521,7 +382,7 @@ const Reporting = () => {
 
     const statusCounts = {
       open: filteredWorkOrders.filter((wo) => wo.status === 'open').length,
-      on_hold: filteredWorkOrders.filter((wo) => wo.status === 'cancelled').length,
+      on_hold: filteredWorkOrders.filter((wo) => wo.status === 'on_hold').length,
       in_progress: filteredWorkOrders.filter((wo) => wo.status === 'in_progress').length,
       done: filteredWorkOrders.filter((wo) => wo.status === 'completed').length,
     };
@@ -670,8 +531,6 @@ const Reporting = () => {
     { key: 'recurrence', title: 'Recurrence', sortable: true },
   ]), [users, assets, locations]);
 
-  const requestCountInRange = useMemo(() => (requests || []).filter((r) => inRange(r.createdAt)).length, [requests, startDate, endDate]);
-
   const applyPreset = (preset) => {
     const end = new Date();
     const start = new Date();
@@ -683,8 +542,6 @@ const Reporting = () => {
   const clearFilters = () => setFilters({ assignedTo: '', dueDate: '', locationId: '', priority: '' });
 
   const headerExportSection = useMemo(() => {
-    if (activeTab === 'requests') return 'requests';
-    if (activeTab === 'asset_health') return 'asset_status';
     return 'work_orders';
   }, [activeTab]);
 
@@ -708,19 +565,6 @@ const Reporting = () => {
     const userName = (id) => (users || []).find((u) => u.id === id)?.name || '';
 
     const rows = (() => {
-      if (section === 'requests') {
-        const list = (requests || []).filter((r) => inHeaderRange(r.createdAt));
-        return list.map((r) => ({
-          ID: r.id,
-          Title: r.title,
-          Status: r.status,
-          Priority: r.priority,
-          Asset: assetName(r.assetId),
-          Location: locationName(r.locationId),
-          CreatedAt: r.createdAt ? new Date(r.createdAt).toLocaleString() : '',
-        }));
-      }
-
       if (section === 'asset_status') {
         const list = (assetHealthEvents || []).filter((ev) => inHeaderRange(ev.timestamp));
         return list.map((ev) => ({
@@ -732,8 +576,8 @@ const Reporting = () => {
         }));
       }
 
-      const list = (workOrders || []).filter((wo) => {
-        const createdOk = inHeaderRange(wo.createdAt);
+      const list = (apiWorkOrders || []).filter((wo) => {
+        const createdOk = inHeaderRange(wo.createdAt || wo.startDate || wo.dueDate);
         const completedOk = inHeaderRange(wo.completedAt);
         const dueOk = inHeaderRange(wo.dueDate);
         return createdOk || completedOk || dueOk;
@@ -888,87 +732,7 @@ const Reporting = () => {
       </div>
 
       {activeTab !== 'work_orders' ? (
-        activeTab === 'asset_health' ? (
-          <div className="space-y-4">
-            <div className="text-2xl font-bold text-gray-900">Asset Health</div>
-
-            <Card>
-              <CardBody>
-                {(assets || []).length === 0 ? (
-                  <div className="text-center py-10 text-sm text-gray-500">No assets available. Add an asset to start tracking health.</div>
-                ) : !assetHealthDerived.hasAnyEvents ? (
-                  <div className="text-center py-10 text-sm text-gray-500">No data available. Change an asset status to start tracking health.</div>
-                ) : (
-                  <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
-                    <div className="rounded-md border border-gray-200 bg-white p-4">
-                      <div className="text-xs text-gray-500">Asset Availability (Last 30 Days)</div>
-                      <div className="mt-2 text-2xl font-bold text-gray-900">{Math.round(assetHealthDerived.overallAvailability * 100)}%</div>
-                      <div className="mt-1 text-xs text-gray-500">Average across assets</div>
-                    </div>
-                    <div className="rounded-md border border-gray-200 bg-white p-4">
-                      <div className="text-xs text-gray-500">Online</div>
-                      <div className="mt-2 text-2xl font-bold text-gray-900">{assetHealthDerived.onlineCount}</div>
-                      <div className="mt-1 text-xs text-gray-500">Current status</div>
-                    </div>
-                    <div className="rounded-md border border-gray-200 bg-white p-4">
-                      <div className="text-xs text-gray-500">Offline (Unplanned)</div>
-                      <div className="mt-2 text-2xl font-bold text-gray-900">{assetHealthDerived.offlineUnplannedCount}</div>
-                      <div className="mt-1 text-xs text-gray-500">Current status</div>
-                    </div>
-                    <div className="rounded-md border border-gray-200 bg-white p-4">
-                      <div className="text-xs text-gray-500">Offline (Planned)</div>
-                      <div className="mt-2 text-2xl font-bold text-gray-900">{assetHealthDerived.offlinePlannedCount}</div>
-                      <div className="mt-1 text-xs text-gray-500">Current status</div>
-                    </div>
-                  </div>
-                )}
-              </CardBody>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold text-gray-900">Most Problematic Assets</div>
-                  <button type="button" className="h-7 w-7 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50">+</button>
-                </div>
-              </CardHeader>
-              <CardBody>
-                {assetHealthDerived.mostProblematic.length === 0 ? (
-                  <div className="text-center py-10 text-sm text-gray-500">No data available. Try changing asset statuses to generate health metrics.</div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
-                          <th className="py-2 pr-4">Asset Name</th>
-                          <th className="py-2 pr-4">Location</th>
-                          <th className="py-2 pr-4">Unplanned Downtime</th>
-                          <th className="py-2 pr-4">Failures</th>
-                          <th className="py-2 pr-4">MTTR</th>
-                          <th className="py-2 pr-4">MTBF</th>
-                          <th className="py-2 pr-4">Availability</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {assetHealthDerived.mostProblematic.map((r) => (
-                          <tr key={r.assetId} className="border-b border-gray-50">
-                            <td className="py-2 pr-4 text-gray-900">{r.assetName}</td>
-                            <td className="py-2 pr-4 text-gray-700">{r.locationName}</td>
-                            <td className="py-2 pr-4 text-gray-700">{Math.round(r.unplannedDownMs / 36e5)} hrs</td>
-                            <td className="py-2 pr-4 text-gray-700">{r.failures}</td>
-                            <td className="py-2 pr-4 text-gray-700">{r.mttrMs ? `${Math.round(r.mttrMs / 60000)} min` : '-'}</td>
-                            <td className="py-2 pr-4 text-gray-700">{r.mtbfMs ? `${Math.round(r.mtbfMs / 36e5)} hrs` : '-'}</td>
-                            <td className="py-2 pr-4 text-gray-700">{Math.round(r.availability * 100)}%</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </CardBody>
-            </Card>
-          </div>
-        ) : activeTab === 'reporting_details' ? (
+        activeTab === 'reporting_details' ? (
           <div className="space-y-4">
             <div className="text-2xl font-bold text-gray-900">Reporting Details</div>
 
@@ -1072,66 +836,6 @@ const Reporting = () => {
               </CardBody>
             </Card>
           </div>
-        ) : activeTab === 'recent_activity' ? (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="text-2xl font-bold text-gray-900">Recent Activity</div>
-              <div className="flex items-center gap-6">
-                <label className="inline-flex items-center gap-2 text-sm text-gray-700">
-                  <span>Show Comments</span>
-                  <input
-                    type="checkbox"
-                    checked={showComments}
-                    onChange={(e) => setShowComments(e.target.checked)}
-                    className="h-4 w-4"
-                  />
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm text-gray-700">
-                  <span>Show All Updates</span>
-                  <input
-                    type="checkbox"
-                    checked={showAllUpdates}
-                    onChange={(e) => setShowAllUpdates(e.target.checked)}
-                    className="h-4 w-4"
-                  />
-                </label>
-              </div>
-            </div>
-
-            <Card>
-              <CardBody>
-                {recentActivities.length === 0 ? (
-                  <div className="min-h-[280px] flex items-center justify-center">
-                    <div className="text-center">
-                      <div className="mx-auto h-16 w-16 rounded-2xl bg-primary-50 flex items-center justify-center">
-                        <Zap className="h-8 w-8 text-primary-600" />
-                      </div>
-                      <div className="mt-4 text-sm text-gray-600">Actions performed all around the platform will show up here.</div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-gray-100">
-                    {recentActivities.map((a) => (
-                      <div key={a.id || `${a.kind}-${a.timestamp}`} className="py-4 flex items-start gap-3">
-                        <div className="mt-0.5 h-8 w-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600">
-                          {a.kind === 'comment' ? <MessageSquare className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm text-gray-900">{a.message || a.title || 'Update'}</div>
-                          <div className="mt-1 text-xs text-gray-500">
-                            {a.timestamp ? new Date(a.timestamp).toLocaleString() : ''}
-                          </div>
-                        </div>
-                        {a.entityType && a.entityId && (
-                          <div className="text-xs text-gray-500">{a.entityType}: {a.entityId}</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardBody>
-            </Card>
-          </div>
         ) : activeTab === 'export_data' ? (
           <div className="space-y-4">
             <div className="text-2xl font-bold text-gray-900">Export Data</div>
@@ -1142,15 +846,9 @@ const Reporting = () => {
                   { id: 'work_orders', label: 'Work Orders' },
                   { id: 'assets', label: 'Assets' },
                   { id: 'asset_status', label: 'Asset Status' },
-                  { id: 'locations', label: 'Locations' },
                   { id: 'parts', label: 'Parts' },
                   { id: 'part_transactions', label: 'Part Transactions' },
-                  { id: 'meters', label: 'Meters' },
-                  { id: 'meter_reading', label: 'Meter Reading' },
                   { id: 'vendors', label: 'Vendors' },
-                  { id: 'requests', label: 'Requests' },
-                  { id: 'time_cost', label: 'Time & Cost Tracking' },
-                  { id: 'labor_utilization', label: 'Labor Utilization' },
                 ].map((t) => (
                   <button
                     key={t.id}
@@ -1493,64 +1191,6 @@ const Reporting = () => {
                   </div>
                 </CardBody>
               </Card>
-            ) : exportSection === 'locations' ? (
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-gray-900">Export Location List</div>
-                    <button type="button" className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                      <Filter className="h-4 w-4 text-gray-400" />
-                      Filters
-                    </button>
-                  </div>
-                </CardHeader>
-                <CardBody>
-                  <div className="space-y-6 max-w-xl">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Export Format</div>
-                      <div className="mt-2 space-y-2 text-sm text-gray-700">
-                        <label className="flex items-center gap-2">
-                          <input type="radio" name="exportLocationsFormat" checked={exportForm.format === 'csv'} onChange={() => setExportForm((p) => ({ ...p, format: 'csv' }))} />
-                          CSV (Excel)
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <input type="radio" name="exportLocationsFormat" checked={exportForm.format === 'qr_pdf'} onChange={() => setExportForm((p) => ({ ...p, format: 'qr_pdf' }))} />
-                          QR Codes (PDF)
-                        </label>
-                      </div>
-                    </div>
-
-                    <div>
-                      <button type="button" onClick={() => setExportForm((p) => ({ ...p, columnsOpen: !p.columnsOpen }))} className="w-full flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                        Columns
-                        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${exportForm.columnsOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      {exportForm.columnsOpen && (
-                        <div className="mt-2 rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-700 space-y-2">
-                          {[
-                            { key: 'id', label: 'ID' },
-                            { key: 'name', label: 'Name' },
-                            { key: 'address', label: 'Address' },
-                          ].map((c) => (
-                            <label key={c.key} className="flex items-center gap-2">
-                              <input type="checkbox" defaultChecked />
-                              {c.label}
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-end gap-3 pt-2">
-                      <button type="button" onClick={() => alert('Schedule would be implemented here.')} className="text-sm text-primary-600 hover:text-primary-700">Schedule</button>
-                      <Button onClick={handleExport}>
-                        <Download className="w-4 h-4 mr-2" />
-                        Export
-                      </Button>
-                    </div>
-                  </div>
-                </CardBody>
-              </Card>
             ) : exportSection === 'parts' ? (
               <Card>
                 <CardHeader>
@@ -1676,121 +1316,6 @@ const Reporting = () => {
                   </div>
                 </CardBody>
               </Card>
-            ) : exportSection === 'meters' ? (
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-gray-900">Export Meter List</div>
-                    <button type="button" className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                      <Filter className="h-4 w-4 text-gray-400" />
-                      Filters
-                    </button>
-                  </div>
-                </CardHeader>
-                <CardBody>
-                  <div className="space-y-6 max-w-xl">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Export Format</div>
-                      <div className="mt-2 space-y-2 text-sm text-gray-700">
-                        <label className="flex items-center gap-2">
-                          <input type="radio" name="exportMetersFormat" checked={exportForm.format === 'csv'} onChange={() => setExportForm((p) => ({ ...p, format: 'csv' }))} />
-                          CSV (Excel)
-                        </label>
-                      </div>
-                    </div>
-
-                    <div>
-                      <button type="button" onClick={() => setExportForm((p) => ({ ...p, columnsOpen: !p.columnsOpen }))} className="w-full flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                        Columns
-                        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${exportForm.columnsOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      {exportForm.columnsOpen && (
-                        <div className="mt-2 rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-700 space-y-2">
-                          {[
-                            { key: 'id', label: 'ID' },
-                            { key: 'name', label: 'Name' },
-                            { key: 'asset', label: 'Asset' },
-                            { key: 'unit', label: 'Unit' },
-                          ].map((c) => (
-                            <label key={c.key} className="flex items-center gap-2">
-                              <input type="checkbox" defaultChecked />
-                              {c.label}
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-end gap-3 pt-2">
-                      <button type="button" onClick={() => alert('Schedule would be implemented here.')} className="text-sm text-primary-600 hover:text-primary-700">Schedule</button>
-                      <Button onClick={handleExport}>
-                        <Download className="w-4 h-4 mr-2" />
-                        Export
-                      </Button>
-                    </div>
-                  </div>
-                </CardBody>
-              </Card>
-            ) : exportSection === 'meter_reading' ? (
-              <Card>
-                <CardHeader>
-                  <div className="text-sm font-semibold text-gray-900">Export Readings List</div>
-                </CardHeader>
-                <CardBody>
-                  <div className="space-y-6 max-w-xl">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Date Range</div>
-                      <div className="mt-2 inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
-                        <Calendar className="h-4 w-4 text-gray-400" />
-                        <input type="date" value={exportForm.start || dateRange.start} onChange={(e) => setExportForm((p) => ({ ...p, start: e.target.value }))} className="bg-transparent outline-none" />
-                        <span className="text-gray-300">-</span>
-                        <input type="date" value={exportForm.end || dateRange.end} onChange={(e) => setExportForm((p) => ({ ...p, end: e.target.value }))} className="bg-transparent outline-none" />
-                      </div>
-                      <div className="mt-1 text-xs text-gray-500">{exportDateRangeText}</div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Export Format</div>
-                      <div className="mt-2 space-y-2 text-sm text-gray-700">
-                        <label className="flex items-center gap-2">
-                          <input type="radio" name="exportMeterReadingsFormat" checked={exportForm.format === 'csv'} onChange={() => setExportForm((p) => ({ ...p, format: 'csv' }))} />
-                          CSV (Excel)
-                        </label>
-                      </div>
-                    </div>
-
-                    <div>
-                      <button type="button" onClick={() => setExportForm((p) => ({ ...p, columnsOpen: !p.columnsOpen }))} className="w-full flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                        Columns
-                        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${exportForm.columnsOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      {exportForm.columnsOpen && (
-                        <div className="mt-2 rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-700 space-y-2">
-                          {[
-                            { key: 'meter', label: 'Meter' },
-                            { key: 'reading', label: 'Reading' },
-                            { key: 'date', label: 'Date' },
-                            { key: 'user', label: 'User' },
-                          ].map((c) => (
-                            <label key={c.key} className="flex items-center gap-2">
-                              <input type="checkbox" defaultChecked />
-                              {c.label}
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-end gap-3 pt-2">
-                      <button type="button" onClick={() => alert('Schedule would be implemented here.')} className="text-sm text-primary-600 hover:text-primary-700">Schedule</button>
-                      <Button onClick={handleExport}>
-                        <Download className="w-4 h-4 mr-2" />
-                        Export
-                      </Button>
-                    </div>
-                  </div>
-                </CardBody>
-              </Card>
             ) : exportSection === 'vendors' ? (
               <Card>
                 <CardHeader>
@@ -1840,226 +1365,15 @@ const Reporting = () => {
                   </div>
                 </CardBody>
               </Card>
-            ) : exportSection === 'requests' ? (
-              <Card>
-                <CardHeader>
-                  <div className="text-sm font-semibold text-gray-900">Export Request List</div>
-                </CardHeader>
-                <CardBody>
-                  <div className="space-y-6 max-w-xl">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Date Range</div>
-                      <div className="mt-2 inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
-                        <Calendar className="h-4 w-4 text-gray-400" />
-                        <input type="date" value={exportForm.start || dateRange.start} onChange={(e) => setExportForm((p) => ({ ...p, start: e.target.value }))} className="bg-transparent outline-none" />
-                        <span className="text-gray-300">-</span>
-                        <input type="date" value={exportForm.end || dateRange.end} onChange={(e) => setExportForm((p) => ({ ...p, end: e.target.value }))} className="bg-transparent outline-none" />
-                      </div>
-                      <div className="mt-1 text-xs text-gray-500">{exportDateRangeText}</div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Export Format</div>
-                      <div className="mt-2 space-y-2 text-sm text-gray-700">
-                        <label className="flex items-center gap-2">
-                          <input type="radio" name="exportRequestsFormat" checked={exportForm.format === 'csv'} onChange={() => setExportForm((p) => ({ ...p, format: 'csv' }))} />
-                          CSV (Excel)
-                        </label>
-                      </div>
-                    </div>
-
-                    <div>
-                      <button type="button" onClick={() => setExportForm((p) => ({ ...p, columnsOpen: !p.columnsOpen }))} className="w-full flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                        Columns
-                        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${exportForm.columnsOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      {exportForm.columnsOpen && (
-                        <div className="mt-2 rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-700 space-y-2">
-                          {[
-                            { key: 'id', label: 'ID' },
-                            { key: 'title', label: 'Title' },
-                            { key: 'status', label: 'Status' },
-                            { key: 'priority', label: 'Priority' },
-                            { key: 'createdAt', label: 'Created At' },
-                          ].map((c) => (
-                            <label key={c.key} className="flex items-center gap-2">
-                              <input type="checkbox" defaultChecked />
-                              {c.label}
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-end gap-3 pt-2">
-                      <button type="button" onClick={() => alert('Schedule would be implemented here.')} className="text-sm text-primary-600 hover:text-primary-700">Schedule</button>
-                      <Button onClick={handleExport}>
-                        <Download className="w-4 h-4 mr-2" />
-                        Export
-                      </Button>
-                    </div>
-                  </div>
-                </CardBody>
-              </Card>
-            ) : exportSection === 'time_cost' ? (
-              <Card>
-                <CardHeader>
-                  <div className="text-sm font-semibold text-gray-900">Time &amp; Cost Tracking</div>
-                </CardHeader>
-                <CardBody>
-                  <div className="space-y-6 max-w-xl">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Date Range</div>
-                      <div className="mt-2 inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
-                        <Calendar className="h-4 w-4 text-gray-400" />
-                        <input type="date" value={exportForm.start || dateRange.start} onChange={(e) => setExportForm((p) => ({ ...p, start: e.target.value }))} className="bg-transparent outline-none" />
-                        <span className="text-gray-300">-</span>
-                        <input type="date" value={exportForm.end || dateRange.end} onChange={(e) => setExportForm((p) => ({ ...p, end: e.target.value }))} className="bg-transparent outline-none" />
-                      </div>
-                      <div className="mt-1 text-xs text-gray-500">{exportDateRangeText}</div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Export Format</div>
-                      <div className="mt-2 space-y-2 text-sm text-gray-700">
-                        <label className="flex items-center gap-2">
-                          <input type="radio" name="exportTimeCostFormat" checked={exportForm.format === 'csv'} onChange={() => setExportForm((p) => ({ ...p, format: 'csv' }))} />
-                          CSV (Excel)
-                        </label>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Export Type</div>
-                      <div className="mt-2 relative">
-                        <select
-                          value={exportForm.exportType}
-                          onChange={(e) => setExportForm((p) => ({ ...p, exportType: e.target.value }))}
-                          className="w-full appearance-none rounded-md border border-gray-200 bg-white px-3 py-2 pr-8 text-sm text-gray-700"
-                        >
-                          <option value="grouped_by_user">Grouped by User</option>
-                          <option value="grouped_by_work_order">Grouped by Work Order</option>
-                          <option value="detailed">Detailed</option>
-                        </select>
-                        <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Additional Options</div>
-                      <label className="mt-2 flex items-center gap-2 text-sm text-gray-700">
-                        <input type="checkbox" checked={exportForm.includeDeletedUsers} onChange={(e) => setExportForm((p) => ({ ...p, includeDeletedUsers: e.target.checked }))} />
-                        Include Deleted Users
-                      </label>
-                    </div>
-
-                    <div>
-                      <button type="button" onClick={() => setExportForm((p) => ({ ...p, columnsOpen: !p.columnsOpen }))} className="w-full flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                        Columns
-                        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${exportForm.columnsOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      {exportForm.columnsOpen && (
-                        <div className="mt-2 rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-700 space-y-2">
-                          {[
-                            { key: 'user', label: 'User' },
-                            { key: 'workOrder', label: 'Work Order' },
-                            { key: 'hours', label: 'Hours' },
-                            { key: 'cost', label: 'Cost' },
-                            { key: 'date', label: 'Date' },
-                          ].map((c) => (
-                            <label key={c.key} className="flex items-center gap-2">
-                              <input type="checkbox" defaultChecked />
-                              {c.label}
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-end gap-3 pt-2">
-                      <button type="button" onClick={() => alert('Schedule would be implemented here.')} className="text-sm text-primary-600 hover:text-primary-700">Schedule</button>
-                      <Button onClick={handleExport}>
-                        <Download className="w-4 h-4 mr-2" />
-                        Export
-                      </Button>
-                    </div>
-                  </div>
-                </CardBody>
-              </Card>
-            ) : exportSection === 'labor_utilization' ? (
-              <Card>
-                <CardHeader>
-                  <div className="text-sm font-semibold text-gray-900">Labor Utilization</div>
-                </CardHeader>
-                <CardBody>
-                  <div className="space-y-6 max-w-xl">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Date Range</div>
-                      <div className="mt-2 inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
-                        <Calendar className="h-4 w-4 text-gray-400" />
-                        <input type="date" value={exportForm.start || dateRange.start} onChange={(e) => setExportForm((p) => ({ ...p, start: e.target.value }))} className="bg-transparent outline-none" />
-                        <span className="text-gray-300">-</span>
-                        <input type="date" value={exportForm.end || dateRange.end} onChange={(e) => setExportForm((p) => ({ ...p, end: e.target.value }))} className="bg-transparent outline-none" />
-                      </div>
-                      <div className="mt-1 text-xs text-gray-500">{exportDateRangeText}</div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Export Format</div>
-                      <div className="mt-2 space-y-2 text-sm text-gray-700">
-                        <label className="flex items-center gap-2">
-                          <input type="radio" name="exportLaborFormat" checked={exportForm.format === 'csv'} onChange={() => setExportForm((p) => ({ ...p, format: 'csv' }))} />
-                          CSV (Excel)
-                        </label>
-                      </div>
-                    </div>
-
-                    <div>
-                      <button type="button" onClick={() => setExportForm((p) => ({ ...p, columnsOpen: !p.columnsOpen }))} className="w-full flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                        Columns
-                        <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${exportForm.columnsOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      {exportForm.columnsOpen && (
-                        <div className="mt-2 rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-700 space-y-2">
-                          {[
-                            { key: 'user', label: 'User' },
-                            { key: 'utilization', label: 'Utilization' },
-                            { key: 'hours', label: 'Hours' },
-                          ].map((c) => (
-                            <label key={c.key} className="flex items-center gap-2">
-                              <input type="checkbox" defaultChecked />
-                              {c.label}
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-end gap-3 pt-2">
-                      <button type="button" onClick={() => alert('Schedule would be implemented here.')} className="text-sm text-primary-600 hover:text-primary-700">Schedule</button>
-                      <Button onClick={handleExport}>
-                        <Download className="w-4 h-4 mr-2" />
-                        Export
-                      </Button>
-                    </div>
-                  </div>
-                </CardBody>
-              </Card>
             ) : (
               <Card>
                 <CardHeader>
                   <h3 className="text-lg font-semibold text-gray-900">{[
                     { id: 'assets', label: 'Assets' },
                     { id: 'asset_status', label: 'Asset Status' },
-                    { id: 'locations', label: 'Locations' },
                     { id: 'parts', label: 'Parts' },
                     { id: 'part_transactions', label: 'Part Transactions' },
-                    { id: 'meters', label: 'Meters' },
-                    { id: 'meter_reading', label: 'Meter Reading' },
                     { id: 'vendors', label: 'Vendors' },
-                    { id: 'requests', label: 'Requests' },
-                    { id: 'time_cost', label: 'Time & Cost Tracking' },
-                    { id: 'labor_utilization', label: 'Labor Utilization' },
                   ].find((x) => x.id === exportSection)?.label}</h3>
                 </CardHeader>
                 <CardBody>
@@ -2067,107 +1381,6 @@ const Reporting = () => {
                 </CardBody>
               </Card>
             )}
-          </div>
-        ) : activeTab === 'requests' ? (
-          <div className="space-y-4">
-            <div className="text-2xl font-bold text-gray-900">Requests</div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700">
-                <Package className="h-4 w-4 text-gray-400" />
-                <select
-                  value={requestFilters.assetId}
-                  onChange={(e) => setRequestFilters((p) => ({ ...p, assetId: e.target.value }))}
-                  className="bg-transparent outline-none"
-                >
-                  <option value="">Asset</option>
-                  {assets.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700">
-                <MapPin className="h-4 w-4 text-gray-400" />
-                <select
-                  value={requestFilters.locationId}
-                  onChange={(e) => setRequestFilters((p) => ({ ...p, locationId: e.target.value }))}
-                  className="bg-transparent outline-none"
-                >
-                  <option value="">Location</option>
-                  {locations.map((l) => (
-                    <option key={l.id} value={l.id}>{l.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700">
-                <AlertTriangle className="h-4 w-4 text-gray-400" />
-                <select
-                  value={requestFilters.priority}
-                  onChange={(e) => setRequestFilters((p) => ({ ...p, priority: e.target.value }))}
-                  className="bg-transparent outline-none"
-                >
-                  <option value="">Priority</option>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="critical">Critical</option>
-                </select>
-              </div>
-
-              <div className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700">
-                <CircleDot className="h-4 w-4 text-gray-400" />
-                <select
-                  value={requestFilters.status}
-                  onChange={(e) => setRequestFilters((p) => ({ ...p, status: e.target.value }))}
-                  className="bg-transparent outline-none"
-                >
-                  <option value="">Status</option>
-                  <option value="open">Open</option>
-                  <option value="in_review">In Review</option>
-                  <option value="approved">Approved</option>
-                  <option value="rejected">Rejected</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
-                  <option value="converted">Converted</option>
-                </select>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowAddFilter(true)}
-                className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                <Plus className="h-4 w-4" />
-                Add Filter
-              </button>
-
-              <Button
-                className="ml-auto"
-                onClick={() => navigate('/requests?new=1')}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                New Request
-              </Button>
-            </div>
-
-            <Card>
-              <CardBody>
-                <div className="min-h-[520px] flex items-center justify-center">
-                  <div className="max-w-md text-center">
-                    <div className="mx-auto h-24 w-24 rounded-2xl bg-primary-50 flex items-center justify-center">
-                      <Inbox className="h-12 w-12 text-primary-600" />
-                    </div>
-                    <div className="mt-6 text-2xl font-bold text-gray-900">Start adding Requests</div>
-                    <div className="mt-2 text-sm text-gray-600">Create a request and track it from submission to completion.</div>
-                    <div className="mt-6">
-                      <Button onClick={() => navigate('/requests?new=1')}>Create Request</Button>
-                    </div>
-                  </div>
-                </div>
-              </CardBody>
-            </Card>
           </div>
         ) : (
           <Card>
@@ -2342,30 +1555,6 @@ const Reporting = () => {
             </CardHeader>
             <CardBody>
               <Table columns={repeatingColumns} data={repeatingWorkOrders} />
-            </CardBody>
-          </Card>
-
-          <div className="text-sm font-semibold text-gray-900">Labor Utilization</div>
-          <Card>
-            <CardBody>
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold text-gray-900">Labor Utilization</div>
-                <button type="button" className="h-7 w-7 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50">+</button>
-              </div>
-              <div className="text-center py-10 text-sm text-gray-500">No labor utilization report. Try changing the date range or reporting period.</div>
-            </CardBody>
-          </Card>
-
-          <div className="text-sm font-semibold text-gray-900">Requests</div>
-          <Card>
-            <CardBody>
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold text-gray-900">Requests</div>
-                <Button variant="secondary" size="sm">Add to Dashboard</Button>
-              </div>
-              <div className="mt-2 text-center py-10 text-sm text-gray-500">
-                {requestCountInRange === 0 ? 'No data available. Try changing the date range or reporting period.' : `${requestCountInRange} requests in this period.`}
-              </div>
             </CardBody>
           </Card>
 
