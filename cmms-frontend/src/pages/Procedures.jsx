@@ -14,9 +14,29 @@ const Procedures = () => {
   const { bumpProceduresVersion } = useStore();
   const [search, setSearch] = useState('');
 
+  const parseConfigOptions = (cfg) => {
+    if (!cfg) return [];
+    if (typeof cfg === 'string') {
+      try {
+        const parsed = JSON.parse(cfg);
+        const opts = Array.isArray(parsed?.options) ? parsed.options : [];
+        return opts.map((x) => String(x ?? '')).filter(Boolean);
+      } catch {
+        return [];
+      }
+    }
+    if (cfg && typeof cfg === 'object') {
+      const opts = Array.isArray(cfg?.options) ? cfg.options : [];
+      return opts.map((x) => String(x ?? '')).filter(Boolean);
+    }
+    return [];
+  };
+
   const [procedures, setProcedures] = useState([]);
   const [assets, setAssets] = useState([]);
   const [selectedProcedure, setSelectedProcedure] = useState(null);
+  const [inspectionValues, setInspectionValues] = useState({});
+  const [fieldValues, setFieldValues] = useState({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -68,7 +88,7 @@ const Procedures = () => {
         const fields = Array.isArray(sec?.fields) ? sec.fields : [];
         fields.forEach((f) => {
           const cfg = f?.config;
-          const cfgOptions = Array.isArray(cfg?.options) ? cfg.options : (Array.isArray(cfg) ? cfg : []);
+          const cfgOptions = parseConfigOptions(cfg);
           const legacyOptions = Array.isArray(f?.options) ? f.options : [];
           normalized.push({
             id: f?.id || newItemId(),
@@ -167,8 +187,18 @@ const Procedures = () => {
         const required = it?.required ? 1 : 0;
         const options = Array.isArray(it?.options) ? it.options : [];
         const fieldType = String(it?.field_type || 'text');
+        const cleanOptions = (fieldType === 'multiple_choice' || fieldType === 'checklist')
+          ? options
+            .map((o) => {
+              if (typeof o === 'string') return o;
+              if (o && typeof o === 'object') return o.label ?? o.value ?? o.name ?? '';
+              return '';
+            })
+            .map((s) => String(s ?? '').trim())
+            .filter(Boolean)
+          : [];
         const config = (fieldType === 'multiple_choice' || fieldType === 'checklist')
-          ? { options }
+          ? JSON.stringify({ options: cleanOptions })
           : null;
         fields.push({
           label: it?.label ?? '',
@@ -228,6 +258,56 @@ const Procedures = () => {
     fetchAssets();
     fetchProcedures();
   }, []);
+
+  useEffect(() => {
+    const proc = selectedProcedure;
+    if (!proc) {
+      setInspectionValues({});
+      setFieldValues({});
+      return;
+    }
+
+    const next = {};
+    const nextValues = {};
+    const secs = Array.isArray(proc?.sections) ? proc.sections : [];
+    secs.forEach((sec) => {
+      const fields = Array.isArray(sec?.fields) ? sec.fields : [];
+      fields.forEach((f) => {
+        const key = String(f?.id || `${f?.label}-${f?.order}`);
+        const ft = String(f?.field_type || 'text');
+
+        if (ft === 'inspection_check') {
+          next[key] = String(f?.value || '');
+          return;
+        }
+
+        if (ft === 'checkbox') {
+          const v = String(f?.value ?? '').toLowerCase();
+          nextValues[key] = Boolean(f?.value === true || f?.value === 1 || v === '1' || v === 'true' || v === 'yes' || v === 'on');
+          return;
+        }
+
+        if (ft === 'checklist') {
+          if (Array.isArray(f?.value)) {
+            nextValues[key] = f.value;
+            return;
+          }
+          if (typeof f?.value === 'string') {
+            const s = f.value.trim();
+            nextValues[key] = s ? s.split(',').map((x) => x.trim()).filter(Boolean) : [];
+            return;
+          }
+          nextValues[key] = [];
+          return;
+        }
+
+        nextValues[key] = f?.value ?? '';
+      });
+    });
+
+    setInspectionValues(next);
+    setFieldValues(nextValues);
+  }, [selectedProcedure]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -606,13 +686,20 @@ const Procedures = () => {
                                     .slice()
                                     .sort((a, b) => Number(a?.order || 0) - Number(b?.order || 0))
                                     .map((f) => {
-                                      const cfgOptions = Array.isArray(f?.config?.options) ? f.config.options : [];
+                                      const cfgOptions = parseConfigOptions(f?.config);
                                       const options = cfgOptions.length ? cfgOptions : (Array.isArray(f?.options) ? f.options : []);
+                                      const fieldType = String(f?.field_type || 'text');
+                                      const fieldKey = String(f?.id || `${f?.label}-${f?.order}`);
+                                      const selected = String(inspectionValues?.[fieldKey] || '');
+                                      const rawValue = fieldKey in (fieldValues || {}) ? fieldValues[fieldKey] : (f?.value ?? '');
                                       return (
-                                        <div key={f?.id || `${f?.label}-${f?.order}`} className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                                        <div
+                                          key={f?.id || `${f?.label}-${f?.order}`}
+                                          className="rounded-md border border-gray-100 bg-gray-50 p-3"
+                                        >
                                           <div className="flex items-start justify-between gap-3">
                                             <div className="text-sm font-medium text-gray-900">{f?.label || 'Untitled field'}</div>
-                                            <div className="text-xs text-gray-600">{String(f?.field_type || 'text')}</div>
+                                            <div className="text-xs text-gray-600">{fieldType}</div>
                                           </div>
                                           <div className="mt-1 text-xs text-gray-600">
                                             {Number(f?.required) ? 'Required' : 'Optional'}
@@ -623,6 +710,121 @@ const Procedures = () => {
                                           {options.length > 0 ? (
                                             <div className="mt-2 text-xs text-gray-600">
                                               Options: {options.join(', ')}
+                                            </div>
+                                          ) : null}
+
+                                          {fieldType === 'text' ? (
+                                            <div className="mt-3">
+                                              <textarea
+                                                rows={3}
+                                                value={String(rawValue ?? '')}
+                                                onChange={(e) => {
+                                                  const v = e.target.value;
+                                                  setFieldValues((p) => ({ ...(p || {}), [fieldKey]: v }));
+                                                }}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                                              />
+                                            </div>
+                                          ) : null}
+
+                                          {fieldType === 'number' || fieldType === 'amount' ? (
+                                            <div className="mt-3">
+                                              <input
+                                                type="number"
+                                                value={rawValue === null || rawValue === undefined ? '' : String(rawValue)}
+                                                onChange={(e) => {
+                                                  const v = e.target.value;
+                                                  setFieldValues((p) => ({ ...(p || {}), [fieldKey]: v }));
+                                                }}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                                              />
+                                            </div>
+                                          ) : null}
+
+                                          {fieldType === 'checkbox' ? (
+                                            <div className="mt-3 flex items-center gap-2">
+                                              <input
+                                                type="checkbox"
+                                                checked={Boolean(rawValue)}
+                                                onChange={(e) => {
+                                                  const v = e.target.checked;
+                                                  setFieldValues((p) => ({ ...(p || {}), [fieldKey]: v }));
+                                                }}
+                                                className="h-4 w-4"
+                                              />
+                                              <span className="text-sm text-gray-700">Checked</span>
+                                            </div>
+                                          ) : null}
+
+                                          {fieldType === 'multiple_choice' ? (
+                                            <div className="mt-3">
+                                              <select
+                                                value={String(rawValue ?? '')}
+                                                onChange={(e) => {
+                                                  const v = e.target.value;
+                                                  setFieldValues((p) => ({ ...(p || {}), [fieldKey]: v }));
+                                                }}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:ring-primary-500 focus:border-primary-500"
+                                              >
+                                                <option value="">Select…</option>
+                                                {options.map((opt) => (
+                                                  <option key={opt} value={opt}>{opt}</option>
+                                                ))}
+                                              </select>
+                                            </div>
+                                          ) : null}
+
+                                          {fieldType === 'checklist' ? (
+                                            <div className="mt-3 space-y-2">
+                                              {options.map((opt) => {
+                                                const list = Array.isArray(rawValue) ? rawValue : [];
+                                                const checked = list.includes(opt);
+                                                return (
+                                                  <label key={opt} className="flex items-center gap-2 text-sm text-gray-700">
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={checked}
+                                                      onChange={(e) => {
+                                                        const next = new Set(Array.isArray(rawValue) ? rawValue : []);
+                                                        if (e.target.checked) next.add(opt);
+                                                        else next.delete(opt);
+                                                        setFieldValues((p) => ({ ...(p || {}), [fieldKey]: Array.from(next) }));
+                                                      }}
+                                                      className="h-4 w-4"
+                                                    />
+                                                    {opt}
+                                                  </label>
+                                                );
+                                              })}
+                                              {options.length === 0 ? (
+                                                <div className="text-sm text-gray-500">No options</div>
+                                              ) : null}
+                                            </div>
+                                          ) : null}
+
+                                          {fieldType === 'inspection_check' ? (
+                                            <div className="mt-3 grid grid-cols-3 gap-3">
+                                              <button
+                                                type="button"
+                                                onClick={() => setInspectionValues((p) => ({ ...p, [fieldKey]: 'pass' }))}
+                                                className={`px-3 py-2 rounded-md border text-sm ${selected === 'pass' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 bg-white text-green-600 hover:bg-gray-50'}`}
+                                              >
+                                                Pass
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setInspectionValues((p) => ({ ...p, [fieldKey]: 'flag' }))}
+                                                className={`px-3 py-2 rounded-md border text-sm ${selected === 'flag' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-gray-200 bg-white text-orange-600 hover:bg-gray-50'}`}
+                                              >
+                                                Flag
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setInspectionValues((p) => ({ ...p, [fieldKey]: 'fail' }))}
+                                                className={`px-3 py-2 rounded-md border text-sm ${selected === 'fail' ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-200 bg-white text-red-600 hover:bg-gray-50'}`}
+                                              >
+                                                Fail
+                                              </button>
                                             </div>
                                           ) : null}
                                         </div>
