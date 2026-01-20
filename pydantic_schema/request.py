@@ -70,6 +70,23 @@ class TeamUpdate(BaseModel):
     description: Optional[str] = None
 
 
+class UserCreate(BaseModel):
+    user_name: str
+    password: str
+    role: Optional[str] = None
+
+
+class UserUpdate(BaseModel):
+    user_name: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[str] = None
+
+
+class TeamUserCreate(BaseModel):
+    team_id: int
+    user_id: int
+
+
 class CategoryCreate(BaseModel):
     name: str
 
@@ -141,3 +158,4 @@ class ProcedureUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     asset_id: Optional[int] = None
+    sections: Optional[List[ProcedureSectionCreate]] = None

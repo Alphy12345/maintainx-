@@ -14,6 +14,24 @@ class VendorOut(BaseModel):
         from_attributes = True
 
 
+class TeamUserOut(BaseModel):
+    id: int
+    team_id: int
+    user_id: int
+
+    class Config:
+        from_attributes = True
+
+
+class UserOut(BaseModel):
+    id: int
+    user_name: str
+    role: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class CategoryOut(BaseModel):
     id: int
     name: str
@@ -58,6 +76,7 @@ class TeamOut(BaseModel):
     id: int
     team_name: str
     description: Optional[str] = None
+    users: List[UserOut] = []
 
     class Config:
         from_attributes = True

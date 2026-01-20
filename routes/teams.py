@@ -1,7 +1,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from db import get_db
 from models.models import Team
@@ -22,12 +22,12 @@ def create_team(payload: TeamCreate, db: Session = Depends(get_db)):
 
 @router.get("", response_model=List[TeamOut])
 def list_teams(db: Session = Depends(get_db)):
-    return db.query(Team).order_by(Team.id.desc()).all()
+    return db.query(Team).options(selectinload(Team.users)).order_by(Team.id.desc()).all()
 
 
 @router.get("/{team_id}", response_model=TeamOut)
 def get_team(team_id: int, db: Session = Depends(get_db)):
-    team = db.query(Team).filter(Team.id == team_id).first()
+    team = db.query(Team).options(selectinload(Team.users)).filter(Team.id == team_id).first()
     if not team:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
     return team

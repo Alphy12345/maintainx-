@@ -85,6 +85,18 @@ class Team(Base):
 
     work_orders = relationship("WorkOrder", back_populates="team")
 
+    team_users = relationship(
+        "TeamUser",
+        back_populates="team",
+        cascade="all, delete-orphan",
+    )
+
+    users = relationship(
+        "User",
+        secondary="team_users",
+        viewonly=True,
+    )
+
 
 # =====================================================
 # User
@@ -96,6 +108,29 @@ class User(Base):
     user_name = Column(String(255), nullable=False, unique=True)
     password = Column(String(255), nullable=False)
     role = Column(String(50))
+
+    team_users = relationship(
+        "TeamUser",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    teams = relationship(
+        "Team",
+        secondary="team_users",
+        viewonly=True,
+    )
+
+
+class TeamUser(Base):
+    __tablename__ = "team_users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    team = relationship("Team", back_populates="team_users")
+    user = relationship("User", back_populates="team_users")
 
 
 # =====================================================

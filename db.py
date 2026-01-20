@@ -69,6 +69,22 @@ def init_db():
             if not _column_exists(conn, "work_orders", "status"):
                 conn.execute(text("ALTER TABLE work_orders ADD COLUMN status VARCHAR(50) NOT NULL DEFAULT 'open'"))
 
+        if not _table_exists(conn, "team_users"):
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE team_users (
+                        id SERIAL PRIMARY KEY,
+                        team_id INTEGER NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        CONSTRAINT uq_team_users UNIQUE (team_id, user_id),
+                        FOREIGN KEY(team_id) REFERENCES teams (id) ON DELETE CASCADE,
+                        FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+                    )
+                    """
+                )
+            )
+
         if not _table_exists(conn, "work_order_parts"):
             conn.execute(
                 text(
