@@ -16,21 +16,73 @@
 @layer base {
   * {
     @apply border-gray-200;
+    -webkit-tap-highlight-color: transparent;
+    --tw-ring-offset-width: 0px;
+    --tw-ring-offset-color: transparent;
+    --tw-ring-color: transparent;
   }
   body {
     @apply bg-gray-50 text-gray-900 font-sans antialiased;
+    color-scheme: light;
+  }
+
+  *:focus,
+  *:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  ::selection {
+    background: transparent;
+  }
+
+  select option,
+  select optgroup {
+    background-color: #0f172a;
+    color: #f1f5f9;
+  }
+
+  select option:checked,
+  select option:hover,
+  select option:focus {
+    background-color: #1f2937;
+    color: #f1f5f9;
   }
 }
 
 @layer utilities {
+  /* Global dark UI overrides (apply even when .dark class is NOT present)
+     This prevents any white/very-light highlight boxes from appearing anywhere. */
+  .bg-white { @apply bg-slate-900; }
+  .bg-gray-50 { @apply bg-slate-950; }
+  .bg-gray-100 { @apply bg-slate-900; }
+  .bg-gray-200 { @apply bg-slate-800; }
+
+  .bg-primary-50 { @apply bg-slate-800; }
+  .bg-primary-100 { @apply bg-slate-800; }
+  .bg-primary-200 { @apply bg-slate-700; }
+
+  .hover\:bg-gray-50:hover { @apply bg-slate-900; }
+  .hover\:bg-gray-100:hover { @apply bg-slate-800; }
+  .hover\:bg-primary-50:hover { @apply bg-slate-800; }
+
   .dark body {
     @apply bg-slate-950 text-slate-100;
+    color-scheme: dark;
   }
 
   .dark .bg-white { @apply bg-slate-900; }
   .dark .bg-gray-50 { @apply bg-slate-950; }
   .dark .bg-gray-100 { @apply bg-slate-900; }
   .dark .bg-gray-200 { @apply bg-slate-800; }
+
+  .dark .bg-primary-50 { @apply bg-slate-800; }
+  .dark .bg-primary-100 { @apply bg-slate-800; }
+  .dark .bg-primary-200 { @apply bg-slate-700; }
+
+  .dark .hover\:bg-gray-50:hover { @apply bg-slate-900; }
+  .dark .hover\:bg-gray-100:hover { @apply bg-slate-800; }
+  .dark .hover\:bg-primary-50:hover { @apply bg-slate-800; }
 
   .dark .text-gray-900 { @apply text-slate-100; }
   .dark .text-gray-800 { @apply text-slate-100; }

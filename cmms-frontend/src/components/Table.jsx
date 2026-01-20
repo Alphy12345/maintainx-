@@ -89,7 +89,7 @@ const Table = ({
 
   return (
     <div className={`overflow-x-auto ${className}`}>
-      <table className="min-w-full divide-y divide-gray-200">
+      <table className="min-w-full divide-y divide-gray-200 select-none">
         <thead className="bg-gray-50">
           <tr>
             {columns.map((column) => (
@@ -136,6 +136,9 @@ const Table = ({
               className={`
                 ${onRowClick ? 'cursor-pointer hover:bg-gray-50' : ''}
               `}
+              onMouseDown={(e) => {
+                if (onRowClick) e.preventDefault();
+              }}
               onClick={() => onRowClick && onRowClick(row)}
             >
               {columns.map((column) => (

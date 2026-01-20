@@ -26,7 +26,7 @@ const navigation = [
 ];
 
 const Sidebar = () => {
-  const { sidebarOpen, toggleSidebar, currentUser } = useStore();
+  const { sidebarOpen, toggleSidebar } = useStore();
 
   return (
     <>
@@ -45,7 +45,7 @@ const Sidebar = () => {
       `}>
         <div className="flex h-full flex-col">
         <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200 dark:border-gray-800">
-          <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">CMMS Pro</h1>
+          <div />
           <button
             onClick={toggleSidebar}
             className="lg:hidden p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
@@ -86,18 +86,6 @@ const Sidebar = () => {
           </ul>
         </nav>
 
-        {/* User info */}
-        <div className="mt-auto p-4 border-t border-gray-200 dark:border-gray-800">
-          <div className="flex items-center">
-            <div className="h-8 w-8 rounded-full bg-gray-100 dark:bg-gray-900 flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-200">
-              {(currentUser?.name || 'U').trim().slice(0, 1).toUpperCase()}
-            </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{currentUser?.name || 'Account'}</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">{currentUser?.email || ''}</p>
-            </div>
-          </div>
-        </div>
         </div>
       </div>
     </>

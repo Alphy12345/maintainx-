@@ -43,6 +43,9 @@ const Procedures = () => {
       const options = Array.isArray(it?.options) ? it.options : [];
       return { ...it, options: options.length ? options : ['Option 1'] };
     }
+    if (ft === 'inspection_check') {
+      return { ...it, options: [] };
+    }
     return { ...it, options: Array.isArray(it?.options) ? it.options : [] };
   };
 
@@ -70,6 +73,7 @@ const Procedures = () => {
         label: it?.label ?? it?.name ?? it?.field_name ?? '',
         field_type: it?.field_type ?? it?.input_type ?? 'text',
         required: Boolean(it?.required),
+        value: it?.value ?? '',
         options: Array.isArray(it?.options)
           ? it.options
           : (Array.isArray(it?.choices) ? it.choices : (Array.isArray(it?.items) ? it.items : [])),
@@ -148,6 +152,29 @@ const Procedures = () => {
     setShowModal(true);
   };
 
+  useEffect(() => {
+    if (!showModal) return;
+    if ((Array.isArray(form.sections) ? form.sections : []).length > 0) return;
+
+    setForm((p) => {
+      const current = Array.isArray(p.sections) ? p.sections : [];
+      if (current.length > 0) return p;
+      return {
+        ...p,
+        sections: [
+          {
+            id: newItemId(),
+            type: 'field',
+            label: '',
+            field_type: 'text',
+            required: false,
+            options: [],
+          },
+        ],
+      };
+    });
+  }, [showModal]);
+
   const addBuilderItem = (type) => {
     setForm((p) => {
       const next = Array.isArray(p.sections) ? [...p.sections] : [];
@@ -156,8 +183,16 @@ const Procedures = () => {
       } else if (type === 'section') {
         next.push({ id: newItemId(), type: 'section', title: '' });
       } else {
-        next.push({ id: newItemId(), type: 'field', label: '', field_type: 'text', required: false, options: [] });
+        next.push({ id: newItemId(), type: 'field', label: '', field_type: 'text', required: false, value: '', options: [] });
       }
+      return { ...p, sections: next };
+    });
+  };
+
+  const addCheckboxItem = () => {
+    setForm((p) => {
+      const next = Array.isArray(p.sections) ? [...p.sections] : [];
+      next.push({ id: newItemId(), type: 'field', label: '', field_type: 'checkbox', required: false, value: '', options: [] });
       return { ...p, sections: next };
     });
   };
@@ -234,11 +269,27 @@ const Procedures = () => {
   const handleSave = async () => {
     const name = String(form.name || '').trim();
     if (!name) return;
+    const cleanSections = (Array.isArray(form.sections) ? form.sections : []).map((it) => {
+      if (it?.type === 'heading') {
+        return { id: it.id, type: 'heading', text: it.text ?? '' };
+      }
+      if (it?.type === 'section') {
+        return { id: it.id, type: 'section', title: it.title ?? '' };
+      }
+      return {
+        id: it.id,
+        type: 'field',
+        label: it.label ?? '',
+        field_type: it.field_type ?? 'text',
+        required: Boolean(it.required),
+        options: Array.isArray(it.options) ? it.options : [],
+      };
+    });
     const payload = {
       name,
       description: String(form.description || ''),
       asset_id: form.asset_id ? Number(form.asset_id) : null,
-      sections: Array.isArray(form.sections) ? form.sections : [],
+      sections: cleanSections,
     };
 
     setSaving(true);
@@ -362,7 +413,7 @@ const Procedures = () => {
                       key={p.id}
                       type="button"
                       onClick={() => setSelectedProcedure(p)}
-                      className={`w-full text-left px-4 py-3 hover:bg-gray-50 ${active ? 'bg-primary-50' : 'bg-white'}`}
+                      className={`w-full text-left px-4 py-3 ${active ? 'bg-slate-800' : 'bg-transparent'} hover:bg-slate-900`}
                     >
                       <div className="text-sm font-semibold text-gray-900 truncate">{p.name}</div>
                       <div className="mt-1 text-xs text-gray-500 truncate">{assetName}</div>
@@ -482,7 +533,7 @@ const Procedures = () => {
                                   setTypeMenuOpenForId((prev) => (prev === it.id ? null : it.id));
                                   setTypeSearch('');
                                 }}
-                                className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-md bg-white focus:ring-primary-500 focus:border-primary-500"
+                                className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 border border-gray-700 rounded-md bg-transparent text-gray-100 focus:outline-none focus:ring-0"
                               >
                                 <span className="inline-flex items-center gap-2 text-sm text-gray-700">
                                   {(() => {
@@ -500,15 +551,15 @@ const Procedures = () => {
                               </button>
 
                               {typeMenuOpenForId === it.id && (
-                                <div className="absolute z-20 mt-2 w-full rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
-                                  <div className="px-2 py-2 border-b border-gray-200">
+                                <div className="absolute z-20 mt-2 w-full rounded-md border border-gray-700 bg-gray-900 shadow-lg overflow-hidden">
+                                  <div className="px-2 py-2 border-b border-gray-700">
                                     <div className="relative">
                                       <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                                       <input
                                         value={typeSearch}
                                         onChange={(e) => setTypeSearch(e.target.value)}
                                         placeholder="Search"
-                                        className="w-full pl-8 pr-2 py-2 text-sm border border-gray-200 rounded-md focus:ring-primary-500 focus:border-primary-500"
+                                        className="w-full pl-8 pr-2 py-2 text-sm border border-gray-700 rounded-md bg-gray-900 text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-0"
                                       />
                                     </div>
                                   </div>
@@ -526,7 +577,7 @@ const Procedures = () => {
                                               updateBuilderItem(it.id, { field_type: x.key });
                                               setTypeMenuOpenForId(null);
                                             }}
-                                            className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 inline-flex items-center gap-2 ${active ? 'bg-primary-50' : 'bg-white'}`}
+                                            className={`w-full px-3 py-2 text-left text-sm inline-flex items-center gap-2 text-gray-100 focus:outline-none ${active ? 'bg-gray-800' : 'bg-transparent'} hover:bg-gray-800`}
                                           >
                                             <Icon className="h-4 w-4 text-gray-500" />
                                             {x.label}
@@ -543,10 +594,8 @@ const Procedures = () => {
                             <div>
                               <textarea
                                 rows={3}
-                                disabled
-                                value=""
                                 placeholder="Text will be entered here"
-                                className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-sm"
+                                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm"
                               />
                             </div>
                           )}
@@ -555,10 +604,8 @@ const Procedures = () => {
                             <div>
                               <input
                                 type="number"
-                                disabled
-                                value=""
                                 placeholder="Number will be entered here"
-                                className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-sm"
+                                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm"
                               />
                             </div>
                           )}
@@ -568,18 +615,25 @@ const Procedures = () => {
                               <div className="text-sm text-gray-700">$</div>
                               <input
                                 type="number"
-                                disabled
-                                value=""
                                 placeholder="Amount will be entered here"
-                                className="flex-1 px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-sm"
+                                className="flex-1 px-3 py-2 border border-gray-200 rounded-md text-sm"
                               />
                             </div>
                           )}
 
                           {it.field_type === 'checkbox' && (
-                            <div className="flex items-center gap-2 text-sm text-gray-700">
-                              <input type="checkbox" disabled className="rounded border-gray-300" />
-                              Checkbox
+                            <div className="space-y-2">
+                              <label className="flex items-center gap-2 text-sm text-gray-700">
+                                <input type="checkbox" className="rounded border-gray-300" />
+                                {it.label?.trim() ? it.label : 'Checkbox'}
+                              </label>
+                              <button
+                                type="button"
+                                onClick={addCheckboxItem}
+                                className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                              >
+                                + Add Checkbox
+                              </button>
                             </div>
                           )}
 
@@ -615,9 +669,27 @@ const Procedures = () => {
 
                           {it.field_type === 'inspection_check' && (
                             <div className="grid grid-cols-3 gap-3">
-                              <button type="button" className="px-3 py-2 rounded-md border border-gray-200 bg-white text-sm text-green-600" disabled>Pass</button>
-                              <button type="button" className="px-3 py-2 rounded-md border border-gray-200 bg-white text-sm text-orange-600" disabled>Flag</button>
-                              <button type="button" className="px-3 py-2 rounded-md border border-gray-200 bg-white text-sm text-red-600" disabled>Fail</button>
+                              <button
+                                type="button"
+                                onClick={() => updateBuilderItem(it.id, { value: 'pass' })}
+                                className={`px-3 py-2 rounded-md border text-sm ${it.value === 'pass' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 bg-white text-green-600 hover:bg-gray-50'}`}
+                              >
+                                Pass
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => updateBuilderItem(it.id, { value: 'flag' })}
+                                className={`px-3 py-2 rounded-md border text-sm ${it.value === 'flag' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-gray-200 bg-white text-orange-600 hover:bg-gray-50'}`}
+                              >
+                                Flag
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => updateBuilderItem(it.id, { value: 'fail' })}
+                                className={`px-3 py-2 rounded-md border text-sm ${it.value === 'fail' ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-200 bg-white text-red-600 hover:bg-gray-50'}`}
+                              >
+                                Fail
+                              </button>
                             </div>
                           )}
 
