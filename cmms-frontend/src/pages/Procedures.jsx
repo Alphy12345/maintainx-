@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { CheckCircle2, ChevronDown, Filter, Plus, Search, Trash2, Type, Rows3, SquarePen, Hash, DollarSign, List, ListChecks, ScanSearch, CheckSquare, X } from 'lucide-react';
 import axios from 'axios';
 import { Button, Card, Modal } from '../components';
+import useStore from '../store/useStore';
 
 const API_BASE_URL = 'http://172.18.100.33:8000';
 
@@ -10,6 +11,7 @@ const chipBase =
   'inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50';
 
 const Procedures = () => {
+  const { bumpProceduresVersion } = useStore();
   const [search, setSearch] = useState('');
 
   const [procedures, setProcedures] = useState([]);
@@ -51,6 +53,38 @@ const Procedures = () => {
 
   const normalizeItems = (items) => {
     const list = Array.isArray(items) ? items : [];
+
+    if (list.length > 0 && (list[0]?.fields !== undefined || list[0]?.title !== undefined)) {
+      const normalized = [];
+      list.forEach((sec, secIdx) => {
+        const sectionId = sec?.id || newItemId();
+        normalized.push({
+          id: sectionId,
+          type: 'section',
+          title: sec?.title ?? '',
+          description: sec?.description ?? '',
+        });
+
+        const fields = Array.isArray(sec?.fields) ? sec.fields : [];
+        fields.forEach((f) => {
+          const cfg = f?.config;
+          const cfgOptions = Array.isArray(cfg?.options) ? cfg.options : (Array.isArray(cfg) ? cfg : []);
+          const legacyOptions = Array.isArray(f?.options) ? f.options : [];
+          normalized.push({
+            id: f?.id || newItemId(),
+            type: 'field',
+            label: f?.label ?? '',
+            field_type: f?.field_type ?? 'text',
+            required: Boolean(f?.required),
+            value: f?.value ?? '',
+            options: cfgOptions.length ? cfgOptions : legacyOptions,
+          });
+        });
+      });
+
+      return normalized;
+    }
+
     return list.map((it) => {
       const type = String(it?.type || it?.kind || 'field');
       if (type === 'heading') {
@@ -65,6 +99,7 @@ const Procedures = () => {
           id: it?.id || newItemId(),
           type: 'section',
           title: it?.title ?? it?.text ?? '',
+          description: it?.description ?? '',
         };
       }
       return {
@@ -79,6 +114,75 @@ const Procedures = () => {
           : (Array.isArray(it?.choices) ? it.choices : (Array.isArray(it?.items) ? it.items : [])),
       };
     });
+  };
+
+  const builderItemsToApiSections = (items) => {
+    const list = Array.isArray(items) ? items : [];
+    const sections = [];
+
+    let current = null;
+    let sectionOrder = 0;
+    const pushCurrent = () => {
+      if (!current) return;
+      sectionOrder += 1;
+      sections.push({
+        title: String(current.title || '').trim(),
+        description: String(current.description || '').trim() || null,
+        order: sectionOrder,
+        fields: current.fields,
+      });
+      current = null;
+    };
+
+    const ensureDefaultSection = () => {
+      if (current) return;
+      current = { title: 'General', description: null, fields: [] };
+    };
+
+    list.forEach((it) => {
+      if (it?.type === 'section') {
+        pushCurrent();
+        current = {
+          title: it?.title ?? '',
+          description: it?.description ?? null,
+          fields: [],
+        };
+        return;
+      }
+
+      if (it?.type === 'heading') {
+        pushCurrent();
+        current = {
+          title: it?.text ?? '',
+          description: null,
+          fields: [],
+        };
+        return;
+      }
+
+      if (it?.type === 'field') {
+        ensureDefaultSection();
+        const fields = current.fields;
+        const order = fields.length + 1;
+        const required = it?.required ? 1 : 0;
+        const options = Array.isArray(it?.options) ? it.options : [];
+        const fieldType = String(it?.field_type || 'text');
+        const config = (fieldType === 'multiple_choice' || fieldType === 'checklist')
+          ? { options }
+          : null;
+        fields.push({
+          label: it?.label ?? '',
+          field_type: fieldType,
+          order,
+          required,
+          help_text: null,
+          config,
+        });
+      }
+    });
+
+    pushCurrent();
+    return sections;
   };
 
   const assetsById = useMemo(() => {
@@ -111,8 +215,10 @@ const Procedures = () => {
         if (!prev) return null;
         return rows.find((p) => p.id === prev.id) || null;
       });
+      return rows;
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Failed to load procedures');
+      return [];
     } finally {
       setLoading(false);
     }
@@ -140,7 +246,7 @@ const Procedures = () => {
     setShowModal(true);
   };
 
-  const openEdit = (proc) => {
+  const openEdit = async (proc) => {
     setMode('edit');
     setSelectedProcedure(proc);
     setForm({
@@ -150,10 +256,36 @@ const Procedures = () => {
       sections: normalizeItems(proc?.sections),
     });
     setShowModal(true);
+
+    try {
+      const id = String(proc?.id || '').trim();
+      if (!id) return;
+      const res = await axios.get(`${API_BASE_URL}/procedures/${id}`, {
+        headers: { accept: 'application/json' },
+      });
+      const latest = res?.data;
+      if (!latest) return;
+      setProcedures((prev) => {
+        const list = Array.isArray(prev) ? prev : [];
+        const found = list.some((p) => String(p?.id) === String(latest?.id));
+        if (!found) return list;
+        return list.map((p) => (String(p?.id) === String(latest?.id) ? latest : p));
+      });
+      setSelectedProcedure(latest);
+      setForm({
+        name: latest?.name ?? '',
+        description: latest?.description ?? '',
+        asset_id: latest?.asset_id ? String(latest.asset_id) : '',
+        sections: normalizeItems(latest?.sections),
+      });
+    } catch {
+      // ignore
+    }
   };
 
   useEffect(() => {
     if (!showModal) return;
+    if (mode !== 'create') return;
     if ((Array.isArray(form.sections) ? form.sections : []).length > 0) return;
 
     setForm((p) => {
@@ -173,7 +305,7 @@ const Procedures = () => {
         ],
       };
     });
-  }, [showModal]);
+  }, [showModal, mode]);
 
   const addBuilderItem = (type) => {
     setForm((p) => {
@@ -261,6 +393,7 @@ const Procedures = () => {
       });
       if (selectedProcedure?.id === id) setSelectedProcedure(null);
       await fetchProcedures();
+      bumpProceduresVersion();
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Failed to delete procedure');
     }
@@ -269,22 +402,7 @@ const Procedures = () => {
   const handleSave = async () => {
     const name = String(form.name || '').trim();
     if (!name) return;
-    const cleanSections = (Array.isArray(form.sections) ? form.sections : []).map((it) => {
-      if (it?.type === 'heading') {
-        return { id: it.id, type: 'heading', text: it.text ?? '' };
-      }
-      if (it?.type === 'section') {
-        return { id: it.id, type: 'section', title: it.title ?? '' };
-      }
-      return {
-        id: it.id,
-        type: 'field',
-        label: it.label ?? '',
-        field_type: it.field_type ?? 'text',
-        required: Boolean(it.required),
-        options: Array.isArray(it.options) ? it.options : [],
-      };
-    });
+    const cleanSections = builderItemsToApiSections(form.sections);
     const payload = {
       name,
       description: String(form.description || ''),
@@ -302,12 +420,19 @@ const Procedures = () => {
             'Content-Type': 'application/json',
           },
         });
-        setShowModal(false);
-        await fetchProcedures();
         const next = created?.data;
-        if (next?.id) setSelectedProcedure(next);
+        if (next?.id) {
+          setProcedures((prev) => {
+            const list = Array.isArray(prev) ? prev : [];
+            const without = list.filter((p) => String(p?.id) !== String(next.id));
+            return [next, ...without];
+          });
+          setSelectedProcedure(next);
+        }
+        bumpProceduresVersion();
+        setShowModal(false);
       } else {
-        await axios.patch(`${API_BASE_URL}/procedures/${selectedProcedure.id}`,
+        const updated = await axios.patch(`${API_BASE_URL}/procedures/${selectedProcedure.id}`,
           {
             name: payload.name,
             description: payload.description,
@@ -321,8 +446,18 @@ const Procedures = () => {
             },
           },
         );
+        const next = updated?.data;
+        if (next && Object.keys(next).length > 0) {
+          setProcedures((prev) => {
+            const list = Array.isArray(prev) ? prev : [];
+            return list.map((p) => (String(p?.id) === String(next?.id) ? next : p));
+          });
+          setSelectedProcedure(next);
+        } else {
+          await fetchProcedures();
+        }
+        bumpProceduresVersion();
         setShowModal(false);
-        await fetchProcedures();
       }
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Failed to save procedure');
@@ -451,7 +586,59 @@ const Procedures = () => {
 
                 <div>
                   <div className="text-xs text-gray-500">Sections</div>
-                  <div className="text-sm text-gray-900">{Array.isArray(selectedProcedure.sections) ? selectedProcedure.sections.length : 0}</div>
+                  {Array.isArray(selectedProcedure.sections) && selectedProcedure.sections.length > 0 ? (
+                    <div className="mt-2 space-y-3">
+                      {selectedProcedure.sections
+                        .slice()
+                        .sort((a, b) => Number(a?.order || 0) - Number(b?.order || 0))
+                        .map((sec) => {
+                          const fields = Array.isArray(sec?.fields) ? sec.fields : [];
+                          return (
+                            <div key={sec?.id || `${sec?.title}-${sec?.order}`} className="rounded-md border border-gray-200 p-3">
+                              <div className="text-sm font-semibold text-gray-900">{sec?.title || 'Untitled section'}</div>
+                              {sec?.description ? (
+                                <div className="mt-1 text-sm text-gray-700">{sec.description}</div>
+                              ) : null}
+
+                              {fields.length > 0 ? (
+                                <div className="mt-3 space-y-2">
+                                  {fields
+                                    .slice()
+                                    .sort((a, b) => Number(a?.order || 0) - Number(b?.order || 0))
+                                    .map((f) => {
+                                      const cfgOptions = Array.isArray(f?.config?.options) ? f.config.options : [];
+                                      const options = cfgOptions.length ? cfgOptions : (Array.isArray(f?.options) ? f.options : []);
+                                      return (
+                                        <div key={f?.id || `${f?.label}-${f?.order}`} className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                                          <div className="flex items-start justify-between gap-3">
+                                            <div className="text-sm font-medium text-gray-900">{f?.label || 'Untitled field'}</div>
+                                            <div className="text-xs text-gray-600">{String(f?.field_type || 'text')}</div>
+                                          </div>
+                                          <div className="mt-1 text-xs text-gray-600">
+                                            {Number(f?.required) ? 'Required' : 'Optional'}
+                                          </div>
+                                          {f?.help_text ? (
+                                            <div className="mt-1 text-xs text-gray-600">{f.help_text}</div>
+                                          ) : null}
+                                          {options.length > 0 ? (
+                                            <div className="mt-2 text-xs text-gray-600">
+                                              Options: {options.join(', ')}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      );
+                                    })}
+                                </div>
+                              ) : (
+                                <div className="mt-2 text-sm text-gray-500">No fields</div>
+                              )}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-gray-900">0</div>
+                  )}
                 </div>
               </div>
             )}
@@ -594,6 +781,8 @@ const Procedures = () => {
                             <div>
                               <textarea
                                 rows={3}
+                                value={it.value ?? ''}
+                                onChange={(e) => updateBuilderItem(it.id, { value: e.target.value })}
                                 placeholder="Text will be entered here"
                                 className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm"
                               />
@@ -604,6 +793,8 @@ const Procedures = () => {
                             <div>
                               <input
                                 type="number"
+                                value={it.value ?? ''}
+                                onChange={(e) => updateBuilderItem(it.id, { value: e.target.value })}
                                 placeholder="Number will be entered here"
                                 className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm"
                               />
@@ -615,6 +806,8 @@ const Procedures = () => {
                               <div className="text-sm text-gray-700">$</div>
                               <input
                                 type="number"
+                                value={it.value ?? ''}
+                                onChange={(e) => updateBuilderItem(it.id, { value: e.target.value })}
                                 placeholder="Amount will be entered here"
                                 className="flex-1 px-3 py-2 border border-gray-200 rounded-md text-sm"
                               />

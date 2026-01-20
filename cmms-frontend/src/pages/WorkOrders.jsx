@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Search, ChevronDown, SlidersHorizontal, X, ListChecks, Calendar, MapPin, User, Lock, PauseCircle, RefreshCw, Check } from 'lucide-react';
 import axios from 'axios';
 import { Button, Badge, Modal } from '../components';
@@ -28,12 +28,13 @@ const toApiStatus = (uiStatus) => {
 };
 
 const WorkOrders = () => {
-  const { locations, users, currentUser, addUser, addLocation, addAsset, addProcedure } = useStore();
+  const { locations, users, currentUser, addUser, addLocation, addAsset, addProcedure, proceduresVersion } = useStore();
   const [assets, setAssets] = useState([]);
   const [teams, setTeams] = useState([]);
   const [apiCategories, setApiCategories] = useState([]);
   const [apiParts, setApiParts] = useState([]);
   const [apiProcedures, setApiProcedures] = useState([]);
+  const [apiProcedureDetailsById, setApiProcedureDetailsById] = useState({});
   const [apiVendors, setApiVendors] = useState([]);
   const [workOrders, setWorkOrders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -333,6 +334,107 @@ const WorkOrders = () => {
     return p?.name || '';
   };
 
+  const fetchProcedureDetails = useCallback(async (procedureId) => {
+    const id = String(procedureId || '').trim();
+    if (!id) return null;
+    if (Object.prototype.hasOwnProperty.call(apiProcedureDetailsById, id)) return apiProcedureDetailsById[id];
+    try {
+      const res = await axios.get(`${API_BASE_URL}/procedures/${id}`, { headers: { accept: 'application/json' } });
+      const proc = res?.data;
+      setApiProcedureDetailsById((prev) => ({ ...prev, [id]: proc }));
+      return proc;
+    } catch {
+      setApiProcedureDetailsById((prev) => ({ ...prev, [id]: null }));
+      return null;
+    }
+  }, [apiProcedureDetailsById]);
+
+  const renderProcedureSteps = (procedureId) => {
+    const id = String(procedureId || '').trim();
+    if (!id) return null;
+    const proc = Object.prototype.hasOwnProperty.call(apiProcedureDetailsById, id) ? apiProcedureDetailsById[id] : undefined;
+    const sections = Array.isArray(proc?.sections) ? proc.sections : [];
+
+    if (proc === undefined) {
+      return (
+        <div className="mt-3 text-xs text-gray-500">
+          Loading procedure steps…
+        </div>
+      );
+    }
+
+    if (proc === null) {
+      return (
+        <div className="mt-3 text-xs text-gray-500">
+          Unable to load procedure steps.
+        </div>
+      );
+    }
+
+    if (sections.length === 0) {
+      return (
+        <div className="mt-3 text-xs text-gray-500">
+          No steps found for this procedure.
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-3 space-y-3">
+        <div className="text-xs font-medium text-gray-500">Procedure Details</div>
+        <div className="space-y-3">
+          {sections
+            .slice()
+            .sort((a, b) => Number(a?.order || 0) - Number(b?.order || 0))
+            .map((sec) => {
+              const fields = Array.isArray(sec?.fields) ? sec.fields : [];
+              return (
+                <div key={sec?.id ?? `${id}-sec-${sec?.order ?? ''}-${sec?.title ?? ''}`} className="rounded-md border border-gray-200 px-3 py-3">
+                  <div className="text-sm font-semibold text-gray-900">{sec?.title || 'Untitled section'}</div>
+                  {sec?.description ? (
+                    <div className="mt-1 text-xs text-gray-600">{sec.description}</div>
+                  ) : null}
+
+                  {fields.length > 0 ? (
+                    <div className="mt-3 space-y-2">
+                      {fields
+                        .slice()
+                        .sort((a, b) => Number(a?.order || 0) - Number(b?.order || 0))
+                        .map((f) => {
+                          const cfgOptions = Array.isArray(f?.config?.options) ? f.config.options : [];
+                          const options = cfgOptions.length ? cfgOptions : (Array.isArray(f?.options) ? f.options : []);
+                          return (
+                            <div key={f?.id ?? `${id}-field-${f?.order ?? ''}-${f?.label ?? ''}`} className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="text-sm text-gray-900">{f?.label || 'Untitled field'}</div>
+                                <div className="text-xs text-gray-600">{String(f?.field_type || 'text')}</div>
+                              </div>
+                              <div className="mt-1 text-xs text-gray-600">
+                                {Number(f?.required) ? 'Required' : 'Optional'}
+                              </div>
+                              {f?.help_text ? (
+                                <div className="mt-1 text-xs text-gray-600">{f.help_text}</div>
+                              ) : null}
+                              {options.length > 0 ? (
+                                <div className="mt-1 text-xs text-gray-600">
+                                  Options: {options.map((o) => String(o?.label ?? o ?? '').trim()).filter(Boolean).join(', ')}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-xs text-gray-500">No fields</div>
+                  )}
+                </div>
+              );
+            })}
+        </div>
+      </div>
+    );
+  };
+
   const getStatusBadge = (status) => {
     const variants = {
       open: { variant: 'warning', label: 'Open' },
@@ -440,6 +542,23 @@ const WorkOrders = () => {
     });
 
   const selectedWorkOrder = workOrders.find((wo) => wo.id === selectedWorkOrderId) || null;
+
+  useEffect(() => {
+    const id = String(createForm.procedure || '').trim();
+    if (!id) return;
+    fetchProcedureDetails(id);
+  }, [createForm.procedure, fetchProcedureDetails]);
+
+  useEffect(() => {
+    setApiProcedureDetailsById({});
+    fetchProcedures();
+  }, [proceduresVersion]);
+
+  useEffect(() => {
+    const id = String(selectedWorkOrder?.procedure || '').trim();
+    if (!id) return;
+    fetchProcedureDetails(id);
+  }, [selectedWorkOrder?.procedure, fetchProcedureDetails]);
 
   useEffect(() => {
     if (!selectedWorkOrderId) return;
@@ -1604,6 +1723,12 @@ const WorkOrders = () => {
                       </dd>
                     </div>
                   </dl>
+
+                  {selectedWorkOrder.procedure ? (
+                    <div>
+                      {renderProcedureSteps(selectedWorkOrder.procedure)}
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -1839,30 +1964,34 @@ const WorkOrders = () => {
             <label className="block text-sm font-medium text-gray-700 mb-1">Procedure</label>
             <div className="border border-gray-200 rounded-md p-4 bg-white">
               {createForm.procedure ? (
-                <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-sm text-gray-700">
-                      <ListChecks className="h-4 w-4 text-gray-500" />
-                      <span className="font-medium truncate">{getProcedureName(createForm.procedure)}</span>
+                <div>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 text-sm text-gray-700">
+                        <ListChecks className="h-4 w-4 text-gray-500" />
+                        <span className="font-medium truncate">{getProcedureName(createForm.procedure)}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500 truncate">Procedure attached</div>
                     </div>
-                    <div className="mt-1 text-xs text-gray-500 truncate">Procedure attached</div>
+                    <div className="shrink-0 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setCreateForm((p) => ({ ...p, procedure: '' })); setSelectedProcedureId(''); }}
+                        className="px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        Remove
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowProcedureModal(true); setProcedureSearch(''); setSelectedProcedureId(createForm.procedure || ''); }}
+                        className="inline-flex items-center gap-2 px-4 py-2 border border-primary-500 text-primary-700 rounded-md text-sm hover:bg-primary-50"
+                      >
+                        Change
+                      </button>
+                    </div>
                   </div>
-                  <div className="shrink-0 flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => { setCreateForm((p) => ({ ...p, procedure: '' })); setSelectedProcedureId(''); }}
-                      className="px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
-                    >
-                      Remove
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setShowProcedureModal(true); setProcedureSearch(''); setSelectedProcedureId(createForm.procedure || ''); }}
-                      className="inline-flex items-center gap-2 px-4 py-2 border border-primary-500 text-primary-700 rounded-md text-sm hover:bg-primary-50"
-                    >
-                      Change
-                    </button>
-                  </div>
+
+                  {renderProcedureSteps(createForm.procedure)}
                 </div>
               ) : (
                 <div className="text-center">

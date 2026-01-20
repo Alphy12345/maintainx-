@@ -48,9 +48,11 @@ const useStore = create((set, get) => ({
   sidebarOpen: true,
   darkMode: getInitialDarkMode(),
   currentUser: null,
+  proceduresVersion: 0,
 
   // Actions
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+  bumpProceduresVersion: () => set((state) => ({ proceduresVersion: (state.proceduresVersion || 0) + 1 })),
   toggleDarkMode: () => set((state) => {
     const next = !state.darkMode;
     try {
