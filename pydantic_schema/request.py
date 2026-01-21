@@ -22,6 +22,7 @@ class AssetCreate(BaseModel):
     model_serial_no: Optional[str] = None
     year: Optional[int] = None
     asset_type: Optional[str] = None
+    status: Optional[str] = "running"
     vendor_id: Optional[int] = None
 
 
@@ -35,6 +36,7 @@ class AssetUpdate(BaseModel):
     model_serial_no: Optional[str] = None
     year: Optional[int] = None
     asset_type: Optional[str] = None
+    status: Optional[str] = None
     vendor_id: Optional[int] = None
 
 

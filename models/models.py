@@ -41,6 +41,7 @@ class Asset(Base):
     model_serial_no = Column(String(255))
     year = Column(Integer)
     asset_type = Column(String(100))
+    status = Column(String(50), nullable=False, default="running")
 
     vendor_id = Column(Integer, ForeignKey("vendors.id"))
 

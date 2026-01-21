@@ -51,6 +51,7 @@ class AssetOut(BaseModel):
     model_serial_no: Optional[str] = None
     year: Optional[int] = None
     asset_type: Optional[str] = None
+    status: str
     vendor_id: Optional[int] = None
 
     class Config:

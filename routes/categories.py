@@ -30,3 +30,14 @@ def create_category(payload: CategoryCreate, db: Session = Depends(get_db)):
 @router.get("", response_model=List[CategoryOut])
 def list_categories(db: Session = Depends(get_db)):
     return db.query(Category).order_by(Category.name.asc()).all()
+
+
+@router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_category(category_id: int, db: Session = Depends(get_db)):
+    category = db.query(Category).filter(Category.id == category_id).first()
+    if not category:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+
+    db.delete(category)
+    db.commit()
+    return None

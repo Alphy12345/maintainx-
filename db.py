@@ -61,6 +61,10 @@ def init_db():
         )
 
     with engine.begin() as conn:
+        if _table_exists(conn, "assets"):
+            if not _column_exists(conn, "assets", "status"):
+                conn.execute(text("ALTER TABLE assets ADD COLUMN status VARCHAR(50) NOT NULL DEFAULT 'running'"))
+
         if _table_exists(conn, "work_orders"):
             if not _column_exists(conn, "work_orders", "vendor_id"):
                 conn.execute(text("ALTER TABLE work_orders ADD COLUMN vendor_id INTEGER"))
