@@ -34,12 +34,16 @@ const Procedures = () => {
 
   const [procedures, setProcedures] = useState([]);
   const [assets, setAssets] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [selectedProcedure, setSelectedProcedure] = useState(null);
   const [inspectionValues, setInspectionValues] = useState({});
   const [fieldValues, setFieldValues] = useState({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [openFilter, setOpenFilter] = useState('');
+  const [filters, setFilters] = useState({ categoryId: '', assetId: '' });
+  const [loadingFilterOptions, setLoadingFilterOptions] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [mode, setMode] = useState('create');
   const [form, setForm] = useState({ name: '', description: '', asset_id: '', sections: [] });
@@ -232,6 +236,25 @@ const Procedures = () => {
     }
   };
 
+  const fetchFilterOptions = async () => {
+    setLoadingFilterOptions(true);
+    try {
+      const [catsRes, assetsRes] = await Promise.allSettled([
+        axios.get(`${API_BASE_URL}/categories`, { headers: { accept: 'application/json' } }),
+        axios.get(`${API_BASE_URL}/assets`, { headers: { accept: 'application/json' } }),
+      ]);
+
+      if (catsRes.status === 'fulfilled') setCategories(Array.isArray(catsRes.value?.data) ? catsRes.value.data : []);
+      else setCategories([]);
+
+      if (assetsRes.status === 'fulfilled') setAssets(Array.isArray(assetsRes.value?.data) ? assetsRes.value.data : []);
+    } catch {
+      setCategories([]);
+    } finally {
+      setLoadingFilterOptions(false);
+    }
+  };
+
   const fetchProcedures = async () => {
     setLoading(true);
     setError('');
@@ -255,7 +278,7 @@ const Procedures = () => {
   };
 
   useEffect(() => {
-    fetchAssets();
+    fetchFilterOptions();
     fetchProcedures();
   }, []);
 
@@ -311,14 +334,36 @@ const Procedures = () => {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = procedures || [];
+    let list = procedures || [];
+
+    const hasValue = (p, value, keys) => {
+      const val = String(value || '').trim();
+      if (!val) return true;
+      const lower = val.toLowerCase();
+      return (keys || []).some((k) => {
+        const raw = p?.[k];
+        if (raw === undefined || raw === null) return false;
+        if (Array.isArray(raw)) return raw.map((x) => String(x ?? '').toLowerCase()).includes(lower);
+        return String(raw).toLowerCase().includes(lower);
+      });
+    };
+
+    if (filters.categoryId) {
+      list = list.filter((p) => hasValue(p, filters.categoryId, ['category_id', 'categoryId', 'category', 'category_ids', 'categories']));
+    }
+    if (filters.assetId) {
+      list = list.filter((p) => hasValue(p, filters.assetId, ['asset_id', 'assetId', 'assets']));
+    }
+
     if (!q) return list;
     return list.filter((p) => {
       const assetName = assetsById.get(p.asset_id)?.asset_name || '';
       const hay = `${p.name || ''} ${p.description || ''} ${assetName}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [procedures, search, assetsById]);
+  }, [procedures, search, assetsById, filters]);
+
+  const anyFilterActive = Boolean(filters.categoryId || filters.assetId);
 
   const openCreate = () => {
     setMode('create');
@@ -551,10 +596,6 @@ const Procedures = () => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-gray-900">Procedure Library</h1>
-          <div className="text-sm text-gray-600">00</div>
-          <button type="button" className="text-sm text-gray-700 hover:text-gray-900 inline-flex items-center gap-1">
-            Panel View <ChevronDown className="h-4 w-4 text-gray-400" />
-          </button>
         </div>
 
         <div className="flex items-center gap-3">
@@ -589,13 +630,97 @@ const Procedures = () => {
       ) : null}
 
       <div className="flex items-center gap-2 flex-wrap">
-        <button type="button" className={chipBase}>
-          <Filter className="h-4 w-4 text-gray-400" />
-          Category
-        </button>
-        <button type="button" className={chipBase}>Teams in Charge</button>
-        <button type="button" className={chipBase}>Location</button>
-        <button type="button" className={chipBase}>Asset</button>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setOpenFilter(openFilter === 'category' ? '' : 'category')}
+            className={`${chipBase} ${filters.categoryId ? 'border-primary-300 text-primary-700' : ''}`}
+          >
+            <Filter className="h-4 w-4 text-gray-400" />
+            Category
+            <ChevronDown className="h-4 w-4 text-gray-400" />
+          </button>
+          {openFilter === 'category' ? (
+            <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+              <div className="max-h-64 overflow-y-auto">
+                <button
+                  type="button"
+                  onClick={() => { setFilters((p) => ({ ...p, categoryId: '' })); setOpenFilter(''); }}
+                  className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Any
+                </button>
+                {loadingFilterOptions && categories.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-gray-500">Loading…</div>
+                ) : null}
+                {!loadingFilterOptions && categories.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-gray-500">No categories</div>
+                ) : null}
+                {categories.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => { setFilters((p) => ({ ...p, categoryId: String(c.id) })); setOpenFilter(''); }}
+                    className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    {c.name || String(c.id)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setOpenFilter(openFilter === 'asset' ? '' : 'asset')}
+            className={`${chipBase} ${filters.assetId ? 'border-primary-300 text-primary-700' : ''}`}
+          >
+            Asset
+            <ChevronDown className="h-4 w-4 text-gray-400" />
+          </button>
+          {openFilter === 'asset' ? (
+            <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+              <div className="max-h-64 overflow-y-auto">
+                <button
+                  type="button"
+                  onClick={() => { setFilters((p) => ({ ...p, assetId: '' })); setOpenFilter(''); }}
+                  className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Any
+                </button>
+                {loadingFilterOptions && assets.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-gray-500">Loading…</div>
+                ) : null}
+                {!loadingFilterOptions && assets.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-gray-500">No assets</div>
+                ) : null}
+                {assets.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => { setFilters((p) => ({ ...p, assetId: String(a.id) })); setOpenFilter(''); }}
+                    className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    {a.asset_name || a.name || String(a.id)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {anyFilterActive ? (
+          <button
+            type="button"
+            onClick={() => { setFilters({ categoryId: '', assetId: '' }); setOpenFilter(''); }}
+            className={chipBase}
+          >
+            <X className="h-4 w-4 text-gray-400" />
+            Clear Filters
+          </button>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

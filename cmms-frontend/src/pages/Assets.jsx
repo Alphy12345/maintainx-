@@ -14,9 +14,6 @@ const Assets = () => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-
-  const assetHealthEvents = [];
-  const updateAssetStatus = () => {};
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [assetModalMode, setAssetModalMode] = useState('create');
   const [editingAssetId, setEditingAssetId] = useState(null);
@@ -43,30 +40,9 @@ const Assets = () => {
   const [filters, setFilters] = useState({
     criticality: '',
     status: '',
-    downtimeReason: '',
-    downtimeType: '',
-    assetType: '',
     assetId: '',
   });
   const [searchTerm, setSearchTerm] = useState('');
-
-  const latestDowntimeByAssetId = useMemo(() => {
-    const byAsset = new Map();
-    const list = Array.isArray(assetHealthEvents) ? assetHealthEvents : [];
-    const sorted = [...list]
-      .filter((e) => e && e.assetId && e.timestamp)
-      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-    for (const e of sorted) {
-      if (e.status !== 'down') continue;
-      byAsset.set(e.assetId, {
-        downtimeType: e.downtimeType || '',
-        downtimeReason: e.downtimeReason || '',
-        timestamp: e.timestamp,
-      });
-    }
-    return byAsset;
-  }, [assetHealthEvents]);
 
   const criticalityOptions = useMemo(() => {
     const set = new Set();
@@ -76,30 +52,6 @@ const Assets = () => {
     return [...set].sort();
   }, [assets]);
 
-  const assetTypeOptions = useMemo(() => {
-    const set = new Set();
-    for (const a of (assets || [])) {
-      if (a.assetType) set.add(a.assetType);
-    }
-    return [...set].sort();
-  }, [assets]);
-
-  const downtimeTypeOptions = useMemo(() => {
-    const set = new Set();
-    for (const e of (assetHealthEvents || [])) {
-      if (e?.downtimeType) set.add(e.downtimeType);
-    }
-    return [...set].sort();
-  }, [assetHealthEvents]);
-
-  const downtimeReasonOptions = useMemo(() => {
-    const set = new Set();
-    for (const e of (assetHealthEvents || [])) {
-      if (e?.downtimeReason) set.add(e.downtimeReason);
-    }
-    return [...set].sort();
-  }, [assetHealthEvents]);
-
   const filteredAssets = (assets || []).filter((asset) => {
     const q = (searchTerm || '').trim().toLowerCase();
     const matchesSearch = !q
@@ -108,20 +60,12 @@ const Assets = () => {
 
     const matchesCriticality = !filters.criticality || asset.criticality === filters.criticality;
     const matchesStatus = !filters.status || asset.status === filters.status;
-    const matchesAssetType = !filters.assetType || asset.assetType === filters.assetType;
     const matchesAsset = !filters.assetId || asset.id === filters.assetId;
-
-    const lastDown = latestDowntimeByAssetId.get(asset.id) || { downtimeType: '', downtimeReason: '' };
-    const matchesDowntimeType = !filters.downtimeType || lastDown.downtimeType === filters.downtimeType;
-    const matchesDowntimeReason = !filters.downtimeReason || lastDown.downtimeReason === filters.downtimeReason;
 
     return (
       matchesSearch
       && matchesCriticality
       && matchesStatus
-      && matchesDowntimeType
-      && matchesDowntimeReason
-      && matchesAssetType
       && matchesAsset
     );
   });
@@ -257,8 +201,24 @@ const Assets = () => {
     setSelectedAsset(asset);
   };
 
-  const handleStatusChange = (assetId, newStatus) => {
-    updateAssetStatus(assetId, newStatus);
+  const handleStatusChange = async (assetId, newStatus) => {
+    if (!assetId) return;
+    setError('');
+    setSaving(true);
+    try {
+      const payload = { status: newStatus, asset_status: newStatus, state: newStatus };
+      await axios.patch(`${API_BASE_URL}/assets/${assetId}`, payload, {
+        headers: {
+          accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+      });
+      await fetchAssets();
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to update asset status');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const generateBarcode = () => `BC-${Date.now()}-${Math.random().toString(16).slice(2, 8).toUpperCase()}`;
@@ -525,48 +485,6 @@ const Assets = () => {
 
               <div className="relative">
                 <select
-                  value={filters.downtimeReason}
-                  onChange={(e) => setFilters((p) => ({ ...p, downtimeReason: e.target.value }))}
-                  className="appearance-none rounded-md border border-gray-200 bg-white px-3 py-1.5 pr-8 text-sm text-gray-700"
-                >
-                  <option value="">Downtime Reason</option>
-                  {downtimeReasonOptions.map((r) => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              </div>
-
-              <div className="relative">
-                <select
-                  value={filters.downtimeType}
-                  onChange={(e) => setFilters((p) => ({ ...p, downtimeType: e.target.value }))}
-                  className="appearance-none rounded-md border border-gray-200 bg-white px-3 py-1.5 pr-8 text-sm text-gray-700"
-                >
-                  <option value="">Downtime Type</option>
-                  {downtimeTypeOptions.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              </div>
-
-              <div className="relative">
-                <select
-                  value={filters.assetType}
-                  onChange={(e) => setFilters((p) => ({ ...p, assetType: e.target.value }))}
-                  className="appearance-none rounded-md border border-gray-200 bg-white px-3 py-1.5 pr-8 text-sm text-gray-700"
-                >
-                  <option value="">Asset Types</option>
-                  {assetTypeOptions.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              </div>
-
-              <div className="relative">
-                <select
                   value={filters.assetId}
                   onChange={(e) => setFilters((p) => ({ ...p, assetId: e.target.value }))}
                   className="appearance-none rounded-md border border-gray-200 bg-white px-3 py-1.5 pr-8 text-sm text-gray-700"
@@ -578,14 +496,6 @@ const Assets = () => {
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               </div>
-
-              <button
-                type="button"
-                className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                <Plus className="h-4 w-4" />
-                Add Filter
-              </button>
             </div>
 
             <div className="flex flex-col lg:flex-row gap-3">
@@ -605,7 +515,7 @@ const Assets = () => {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setFilters({ criticality: '', status: '', downtimeReason: '', downtimeType: '', assetType: '', assetId: '' })}
+                  onClick={() => setFilters({ criticality: '', status: '', assetId: '' })}
                   className="inline-flex items-center rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                 >
                   Clear

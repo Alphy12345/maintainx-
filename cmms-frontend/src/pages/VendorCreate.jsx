@@ -1,22 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Camera, Paperclip, Plus } from 'lucide-react';
+import { Paperclip, Plus } from 'lucide-react';
 import axios from 'axios';
 import { Button } from '../components';
 import useStore from '../store/useStore';
 
 const API_BASE_URL = 'http://172.18.100.33:8000';
-
-const COLORS = [
-  { id: 'blue', className: 'bg-blue-500' },
-  { id: 'green', className: 'bg-green-500' },
-  { id: 'yellow', className: 'bg-yellow-500' },
-  { id: 'red', className: 'bg-red-500' },
-  { id: 'teal', className: 'bg-teal-500' },
-  { id: 'pink', className: 'bg-pink-500' },
-  { id: 'purple', className: 'bg-purple-500' },
-  { id: 'orange', className: 'bg-orange-500' },
-];
 
 const VendorCreate = () => {
   const navigate = useNavigate();
@@ -25,25 +14,36 @@ const VendorCreate = () => {
   const isEdit = Boolean(vendorId);
   const { locations, assets, inventory } = useStore();
 
+  const filesInputRef = useRef(null);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const [assetOptionsApi, setAssetOptionsApi] = useState([]);
+  const [partOptionsApi, setPartOptionsApi] = useState([]);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState([]);
+
   const [formData, setFormData] = useState({
     name: '',
-    color: 'blue',
     description: '',
     locations: '',
     assets: '',
     parts: '',
-    vendorTypes: '',
   });
 
   const [contacts, setContacts] = useState([]);
 
   const locationOptions = useMemo(() => locations || [], [locations]);
-  const assetOptions = useMemo(() => assets || [], [assets]);
-  const partOptions = useMemo(() => inventory || [], [inventory]);
+  const assetOptions = useMemo(() => {
+    if ((assetOptionsApi || []).length > 0) return assetOptionsApi;
+    return assets || [];
+  }, [assetOptionsApi, assets]);
+  const partOptions = useMemo(() => {
+    if ((partOptionsApi || []).length > 0) return partOptionsApi;
+    return inventory || [];
+  }, [partOptionsApi, inventory]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -78,12 +78,10 @@ const VendorCreate = () => {
         setFormData((p) => ({
           ...p,
           name: v?.name ?? '',
-          color: v?.color ?? p.color,
           description: v?.description ?? '',
           locations: v?.locations ?? v?.location_id ?? '',
           assets: v?.assets ?? v?.asset_id ?? '',
           parts: v?.parts ?? v?.part_id ?? '',
-          vendorTypes: v?.vendorTypes ?? v?.vendor_types ?? '',
         }));
 
         const apiContacts = v?.contacts;
@@ -105,6 +103,68 @@ const VendorCreate = () => {
     run();
   }, [isEdit, vendorId]);
 
+  useEffect(() => {
+    const run = async () => {
+      setLoadingOptions(true);
+      try {
+        const [assetsRes, partsRes] = await Promise.allSettled([
+          axios.get(`${API_BASE_URL}/assets`, { headers: { accept: 'application/json' } }),
+          axios.get(`${API_BASE_URL}/parts`, { headers: { accept: 'application/json' } }),
+        ]);
+
+        if (assetsRes.status === 'fulfilled') {
+          setAssetOptionsApi(Array.isArray(assetsRes.value?.data) ? assetsRes.value.data : []);
+        } else {
+          setAssetOptionsApi([]);
+        }
+
+        if (partsRes.status === 'fulfilled') {
+          setPartOptionsApi(Array.isArray(partsRes.value?.data) ? partsRes.value.data : []);
+        } else {
+          setPartOptionsApi([]);
+        }
+      } catch {
+        setAssetOptionsApi([]);
+        setPartOptionsApi([]);
+      } finally {
+        setLoadingOptions(false);
+      }
+    };
+
+    run();
+  }, []);
+
+  const openFilesPicker = () => {
+    try {
+      filesInputRef.current?.click();
+    } catch {
+      // noop
+    }
+  };
+
+  const onFilesSelected = (e) => {
+    const list = Array.from(e?.target?.files || []);
+    if (list.length === 0) return;
+    setAttachedFiles((prev) => {
+      const next = [...(prev || [])];
+      list.forEach((f) => {
+        const key = `${f.name}-${f.size}-${f.lastModified}`;
+        if (next.some((x) => x.key === key)) return;
+        next.push({ key, file: f });
+      });
+      return next;
+    });
+    try {
+      e.target.value = '';
+    } catch {
+      // noop
+    }
+  };
+
+  const removeAttachedFile = (key) => {
+    setAttachedFiles((prev) => (prev || []).filter((x) => x.key !== key));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     const name = String(formData.name || '').trim();
@@ -113,20 +173,21 @@ const VendorCreate = () => {
     setSaving(true);
     setError('');
     try {
-      const payload = {
-        name,
-        color: formData.color,
-        description: formData.description,
-        locations: formData.locations,
-        location_id: formData.locations || null,
-        assets: formData.assets,
-        asset_id: formData.assets || null,
-        parts: formData.parts,
-        part_id: formData.parts || null,
-        vendorTypes: formData.vendorTypes,
-        vendor_types: formData.vendorTypes,
-        contacts,
-      };
+      const payload = isEdit
+        ? {
+          name,
+          description: formData.description,
+          locations: formData.locations,
+          location_id: formData.locations || null,
+          assets: formData.assets,
+          asset_id: formData.assets || null,
+          parts: formData.parts,
+          part_id: formData.parts || null,
+          contacts,
+        }
+        : {
+          name,
+        };
 
       if (isEdit) {
         try {
@@ -178,21 +239,12 @@ const VendorCreate = () => {
   };
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-5xl mx-auto p-6">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-semibold text-gray-900">{isEdit ? 'Edit Vendor' : 'New Vendor'}</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{isEdit ? 'Edit Vendor' : 'New Vendor'}</h1>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-8">
-        {loading ? (
-          <div className="p-3 rounded-md border border-gray-200 bg-gray-50 text-gray-700 text-sm">Loading…</div>
-        ) : null}
-        {error ? (
-          <div className="p-3 rounded-md border border-red-200 bg-red-50 text-red-700 text-sm">
-            {error}
-          </div>
-        ) : null}
-
+      <form onSubmit={handleSubmit} className="space-y-6">
         <div>
           <input
             type="text"
@@ -205,174 +257,163 @@ const VendorCreate = () => {
           />
         </div>
 
-        <div className="border-2 border-dashed border-blue-200 bg-blue-50 rounded-lg p-10 text-center">
-          <div className="flex flex-col items-center">
-            <div className="w-10 h-10 rounded-full bg-white border border-blue-100 flex items-center justify-center">
-              <Camera className="w-5 h-5 text-primary-700" />
+        {isEdit ? (
+          <>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Description</label>
+              <textarea
+                name="description"
+                value={formData.description}
+                onChange={handleChange}
+                rows={4}
+                placeholder="Add a description"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              />
             </div>
-            <div className="mt-2 text-sm text-primary-700">Add or drag pictures</div>
-          </div>
-        </div>
 
-        <div className="space-y-3">
-          <label className="block text-sm font-medium text-gray-700">Vendor Color</label>
-          <div className="flex items-center gap-4">
-            {COLORS.map((c) => {
-              const selected = formData.color === c.id;
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setFormData((p) => ({ ...p, color: c.id }))}
-                  className={`w-8 h-8 rounded-full ${c.className} ${
-                    selected ? 'ring-2 ring-offset-2 ring-primary-500' : ''
-                  }`}
-                  aria-label={c.id}
-                />
-              );
-            })}
-          </div>
-        </div>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Contact List</label>
+              <button
+                type="button"
+                onClick={addContact}
+                className="inline-flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700 font-medium"
+              >
+                <Plus className="w-4 h-4" />
+                New Contact
+              </button>
 
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Description</label>
-          <textarea
-            name="description"
-            value={formData.description}
-            onChange={handleChange}
-            rows={4}
-            placeholder="Add a description"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Contact List</label>
-          <button
-            type="button"
-            onClick={addContact}
-            className="inline-flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700 font-medium"
-          >
-            <Plus className="w-4 h-4" />
-            New Contact
-          </button>
-
-          {contacts.length > 0 && (
-            <div className="mt-4 space-y-3">
-              {contacts.map((c) => (
-                <div key={c.id} className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <input
-                    type="text"
-                    placeholder="Name"
-                    value={c.name}
-                    onChange={(e) => updateContact(c.id, { name: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
-                  />
-                  <input
-                    type="email"
-                    placeholder="Email"
-                    value={c.email}
-                    onChange={(e) => updateContact(c.id, { email: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
-                  />
-                  <input
-                    type="tel"
-                    placeholder="Phone"
-                    value={c.phone}
-                    onChange={(e) => updateContact(c.id, { phone: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
-                  />
-                  <div className="md:col-span-3 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => removeContact(c.id)}
-                      className="text-sm text-red-600 hover:text-red-700 font-medium"
-                    >
-                      Remove contact
-                    </button>
-                  </div>
+              {contacts.length > 0 && (
+                <div className="mt-4 space-y-3">
+                  {contacts.map((c) => (
+                    <div key={c.id} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <input
+                        type="text"
+                        placeholder="Name"
+                        value={c.name}
+                        onChange={(e) => updateContact(c.id, { name: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      />
+                      <input
+                        type="email"
+                        placeholder="Email"
+                        value={c.email}
+                        onChange={(e) => updateContact(c.id, { email: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      />
+                      <input
+                        type="tel"
+                        placeholder="Phone"
+                        value={c.phone}
+                        onChange={(e) => updateContact(c.id, { phone: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      />
+                      <div className="md:col-span-3 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => removeContact(c.id)}
+                          className="text-sm text-red-600 hover:text-red-700 font-medium"
+                        >
+                          Remove contact
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          )}
-        </div>
 
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Files</label>
-          <button
-            type="button"
-            className="inline-flex items-center gap-2 px-4 py-2 border border-primary-500 text-primary-700 rounded-md text-sm hover:bg-primary-50"
-          >
-            <Paperclip className="w-4 h-4" />
-            Attach files
-          </button>
-        </div>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Files</label>
+              <input
+                ref={filesInputRef}
+                type="file"
+                multiple
+                onChange={onFilesSelected}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={openFilesPicker}
+                className="inline-flex items-center gap-2 px-4 py-2 border border-primary-500 text-primary-700 rounded-md text-sm hover:bg-primary-50"
+              >
+                <Paperclip className="w-4 h-4" />
+                Attach files
+              </button>
 
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Locations</label>
-          <select
-            name="locations"
-            value={formData.locations}
-            onChange={handleChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-          >
-            <option value="">Start typing...</option>
-            {locationOptions.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        </div>
+              {attachedFiles.length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  {attachedFiles.map((x) => (
+                    <div key={x.key} className="flex items-center justify-between gap-3 rounded-md border border-gray-200 px-3 py-2">
+                      <div className="min-w-0">
+                        <div className="text-sm text-gray-900 truncate">{x.file?.name || 'File'}</div>
+                        <div className="text-xs text-gray-500">{x.file?.type || 'file'} • {Math.round((x.file?.size || 0) / 1024)} KB</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeAttachedFile(x.key)}
+                        className="text-sm text-red-600 hover:text-red-700 font-medium"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <div className="text-xs text-gray-500">Files are selected in the UI.</div>
+                </div>
+              ) : null}
+            </div>
 
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Assets</label>
-          <select
-            name="assets"
-            value={formData.assets}
-            onChange={handleChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-          >
-            <option value="">Start typing...</option>
-            {assetOptions.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-        </div>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Locations</label>
+              <select
+                name="locations"
+                value={formData.locations}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              >
+                <option value="">Start typing...</option>
+                {locationOptions.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Parts</label>
-          <select
-            name="parts"
-            value={formData.parts}
-            onChange={handleChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-          >
-            <option value="">Start typing...</option>
-            {partOptions.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Assets</label>
+              <select
+                name="assets"
+                value={formData.assets}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              >
+                <option value="">{loadingOptions ? 'Loading…' : 'Start typing...'}</option>
+                {assetOptions.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.asset_name || a.name || String(a.id)}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Vendor Types</label>
-          <select
-            name="vendorTypes"
-            value={formData.vendorTypes}
-            onChange={handleChange}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-          >
-            <option value="">Start typing...</option>
-            <option value="supplier">Supplier</option>
-            <option value="contractor">Contractor</option>
-            <option value="manufacturer">Manufacturer</option>
-          </select>
-        </div>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">Parts</label>
+              <select
+                name="parts"
+                value={formData.parts}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              >
+                <option value="">{loadingOptions ? 'Loading…' : 'Start typing...'}</option>
+                {partOptions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name || p.part_name || String(p.id)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        ) : null}
 
         <div className="flex justify-end gap-4 pt-6">
           <button

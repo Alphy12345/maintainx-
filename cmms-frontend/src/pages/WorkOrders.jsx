@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Search, ChevronDown, SlidersHorizontal, X, ListChecks, Calendar, MapPin, User, Lock, PauseCircle, RefreshCw, Check } from 'lucide-react';
+import { Plus, Search, ChevronDown, SlidersHorizontal, X, ListChecks, Calendar, User, Lock, PauseCircle, RefreshCw, Check } from 'lucide-react';
 import axios from 'axios';
 import { Button, Badge, Modal } from '../components';
 import useStore from '../store/useStore';
@@ -27,10 +27,14 @@ const toApiStatus = (uiStatus) => {
   return 'open';
 };
 
+const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 const WorkOrders = () => {
   const { locations, users, currentUser, addUser, addLocation, addAsset, addProcedure, proceduresVersion } = useStore();
   const [assets, setAssets] = useState([]);
   const [teams, setTeams] = useState([]);
+  const [teamUsers, setTeamUsers] = useState([]);
+  const [loadingTeamUsers, setLoadingTeamUsers] = useState(false);
   const [apiCategories, setApiCategories] = useState([]);
   const [apiParts, setApiParts] = useState([]);
   const [apiProcedures, setApiProcedures] = useState([]);
@@ -80,16 +84,36 @@ const WorkOrders = () => {
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState(null);
   const workOrderDetailsRef = useRef(null);
   const [activeTab, setActiveTab] = useState('todo');
+  const [viewMode, setViewMode] = useState('list');
+  const [calendarMode, setCalendarMode] = useState('month');
+  const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => new Date());
+  const dragRafRef = useRef(null);
+  const dragStateRef = useRef({
+    active: false,
+    pointerId: null,
+    workOrderId: null,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    dragging: false,
+    targetDayKey: '',
+    targetDateIso: '',
+  });
+  const [dragUi, setDragUi] = useState({
+    active: false,
+    dragging: false,
+    x: 0,
+    y: 0,
+    workOrderId: null,
+    targetDayKey: '',
+  });
   const [sortBy, setSortBy] = useState('priority_desc');
   const [openFilter, setOpenFilter] = useState('');
-  const [assigneeSearch, setAssigneeSearch] = useState('');
-  const [locationSearch, setLocationSearch] = useState('');
   const [filters, setFilters] = useState({
     status: '',
     priority: '',
     asset: '',
-    assignee: '',
-    location: '',
     dueDatePreset: '',
     dueDateCustom: '',
     categoryId: '',
@@ -104,7 +128,7 @@ const WorkOrders = () => {
     assetName: '',
     assetId: '',
     procedure: '',
-    assignee: '',
+    assigneeId: '',
     estimatedHours: '',
     estimatedMinutes: '',
     dueDate: '',
@@ -144,6 +168,23 @@ const WorkOrders = () => {
       setAssets(Array.isArray(res.data) ? res.data : []);
     } catch {
       setAssets([]);
+    }
+  };
+
+  const fetchTeamUsers = async (teamId) => {
+    if (!teamId) {
+      setTeamUsers([]);
+      return;
+    }
+    setLoadingTeamUsers(true);
+    try {
+      const res = await axios.get(`${API_BASE_URL}/team-users/teams/${teamId}`, { headers: { accept: 'application/json' } });
+      const members = Array.isArray(res?.data?.users) ? res.data.users : [];
+      setTeamUsers(members);
+    } catch {
+      setTeamUsers([]);
+    } finally {
+      setLoadingTeamUsers(false);
     }
   };
 
@@ -202,6 +243,9 @@ const WorkOrders = () => {
         const estimatedDuration = (Number(wo.estimated_time_hours || 0) * 60) + Number(wo.estimated_time_minutes || 0);
         const dueIso = wo.due_date ? new Date(wo.due_date).toISOString() : undefined;
         const startIso = wo.start_date ? new Date(wo.start_date).toISOString() : undefined;
+        const scheduledIso = (wo.scheduled_date || wo.scheduledDate)
+          ? new Date(wo.scheduled_date || wo.scheduledDate).toISOString()
+          : undefined;
 
         const rawStatus = wo.status ?? wo.work_order_status ?? wo.workOrderStatus ?? wo.state ?? wo.work_order_state;
         const idStr = String(wo.id);
@@ -219,6 +263,7 @@ const WorkOrders = () => {
           estimatedDuration: estimatedDuration || undefined,
           dueDate: dueIso,
           startDate: startIso,
+          scheduledDate: scheduledIso,
           recurrence: wo.recurrence || 'does_not_repeat',
           workType: wo.work_type || 'reactive',
           priority: wo.priority || 'low',
@@ -431,6 +476,12 @@ const WorkOrders = () => {
               );
             })}
         </div>
+
+        {viewMode === 'calendar' && dragUi.active ? (
+          <div className="text-sm text-gray-600">
+            Dragging work order: <span className="font-semibold">{String(dragUi.workOrderId)}</span>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -524,14 +575,12 @@ const WorkOrders = () => {
       const matchesStatus = !filters.status || wo.status === filters.status;
       const matchesPriority = !filters.priority || wo.priority === filters.priority;
       const matchesAsset = !filters.asset || wo.assetId === filters.asset;
-      const matchesAssignee = !filters.assignee || wo.assigneeId === filters.assignee;
-      const matchesLocation = !filters.location || wo.locationId === filters.location;
       const matchesDueDate = matchesDueDateFilter(wo);
 
       const matchesCategory = !filters.categoryId || wo.categoryId === filters.categoryId;
       const matchesPart = !filters.part || wo.partId === filters.part;
 
-      return matchesSearch && matchesTab && matchesStatus && matchesPriority && matchesAsset && matchesAssignee && matchesLocation && matchesDueDate && matchesCategory && matchesPart;
+      return matchesSearch && matchesTab && matchesStatus && matchesPriority && matchesAsset && matchesDueDate && matchesCategory && matchesPart;
     })
     .sort((a, b) => {
       if (sortBy === 'priority_desc') return (priorityRank[b.priority] || 0) - (priorityRank[a.priority] || 0);
@@ -548,6 +597,254 @@ const WorkOrders = () => {
     if (!id) return;
     fetchProcedureDetails(id);
   }, [createForm.procedure, fetchProcedureDetails]);
+
+  const parseIsoToDate = (iso) => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return d;
+  };
+
+  const getCalendarDateForWorkOrder = (wo) => {
+    const start = parseIsoToDate(wo?.startDate);
+    if (start) return start;
+    const scheduled = parseIsoToDate(wo?.scheduledDate);
+    if (scheduled) return scheduled;
+    const due = parseIsoToDate(wo?.dueDate);
+    if (due) return due;
+    return null;
+  };
+
+  const startOfWeekMonday = (d) => {
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const day = x.getDay();
+    const diff = (day + 6) % 7;
+    x.setDate(x.getDate() - diff);
+    return x;
+  };
+
+  const calendarDays = useMemo(() => {
+    if (calendarMode === 'week') {
+      const start = startOfWeekMonday(calendarAnchorDate);
+      return Array.from({ length: 7 }, (_v, i) => {
+        const d = new Date(start);
+        d.setDate(d.getDate() + i);
+        return d;
+      });
+    }
+
+    const monthStart = new Date(calendarAnchorDate.getFullYear(), calendarAnchorDate.getMonth(), 1);
+    const gridStart = startOfWeekMonday(monthStart);
+    return Array.from({ length: 42 }, (_v, i) => {
+      const d = new Date(gridStart);
+      d.setDate(d.getDate() + i);
+      return d;
+    });
+  }, [calendarAnchorDate, calendarMode]);
+
+  const workOrdersByDay = useMemo(() => {
+    const map = new Map();
+    (filteredWorkOrders || []).forEach((wo) => {
+      const d = getCalendarDateForWorkOrder(wo);
+      if (!d) return;
+      const key = dayKey(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+      const cur = map.get(key) || [];
+      cur.push(wo);
+      map.set(key, cur);
+    });
+    return map;
+  }, [filteredWorkOrders]);
+
+  const toDateOnlyIso = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const da = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${da}`;
+  };
+
+  const dateOnlyToSafeIso = (dateOnly) => {
+    const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(String(dateOnly || '').trim());
+    if (!m) return undefined;
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const da = Number(m[3]);
+    if (!y || !mo || !da) return undefined;
+    // Use local noon to avoid timezone shifting across date boundaries
+    const dt = new Date(y, mo - 1, da, 12, 0, 0, 0);
+    if (Number.isNaN(dt.getTime())) return undefined;
+    return dt.toISOString();
+  };
+
+  const addDays = (date, days) => {
+    const d = new Date(date);
+    d.setDate(d.getDate() + Number(days || 0));
+    return d;
+  };
+
+  const diffDays = (a, b) => {
+    const a0 = new Date(a.getFullYear(), a.getMonth(), a.getDate());
+    const b0 = new Date(b.getFullYear(), b.getMonth(), b.getDate());
+    const ms = b0.getTime() - a0.getTime();
+    return Math.round(ms / (24 * 60 * 60 * 1000));
+  };
+
+  const formatShort = (iso) => {
+    const d = parseIsoToDate(iso);
+    if (!d) return '';
+    try {
+      return d.toLocaleDateString(undefined, { month: 'short', day: '2-digit' });
+    } catch {
+      return '';
+    }
+  };
+
+  const handleCalendarDrop = async (workOrderId, targetDate) => {
+    const dateOnly = toDateOnlyIso(targetDate);
+    if (!workOrderId || !dateOnly) return;
+
+    const targetStart = new Date(dateOnly);
+    const current = (workOrders || []).find((wo) => String(wo?.id) === String(workOrderId));
+    const currentStart = parseIsoToDate(current?.startDate) || parseIsoToDate(current?.scheduledDate) || parseIsoToDate(current?.dueDate);
+    const currentDue = parseIsoToDate(current?.dueDate);
+    const durationDays = (currentStart && currentDue) ? diffDays(currentStart, currentDue) : 0;
+    const newDueDate = addDays(targetStart, durationDays);
+    const newDueDateOnly = toDateOnlyIso(newDueDate);
+
+    setError('');
+    try {
+      // Optimistic UI update
+      setWorkOrders((prev) => (prev || []).map((wo) => {
+        if (String(wo.id) !== String(workOrderId)) return wo;
+        const startIso = dateOnlyToSafeIso(dateOnly);
+        const dueIso = dateOnlyToSafeIso(newDueDateOnly);
+        return { ...wo, startDate: startIso, scheduledDate: startIso, dueDate: dueIso };
+      }));
+
+      await axios.patch(
+        `${API_BASE_URL}/work-orders/${workOrderId}`,
+        { start_date: dateOnly, due_date: newDueDateOnly, scheduled_date: dateOnly },
+        {
+          headers: {
+            accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+
+      await fetchWorkOrders();
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to reschedule work order');
+      await fetchWorkOrders();
+    }
+  };
+
+  const updateDragUi = () => {
+    const s = dragStateRef.current;
+    setDragUi({
+      active: s.active,
+      dragging: s.dragging,
+      x: s.lastX,
+      y: s.lastY,
+      workOrderId: s.workOrderId,
+      targetDayKey: s.targetDayKey,
+    });
+  };
+
+  const scheduleDragUiUpdate = () => {
+    if (dragRafRef.current) return;
+    dragRafRef.current = window.requestAnimationFrame(() => {
+      dragRafRef.current = null;
+      updateDragUi();
+    });
+  };
+
+  const clearDrag = () => {
+    const s = dragStateRef.current;
+    s.active = false;
+    s.pointerId = null;
+    s.workOrderId = null;
+    s.startX = 0;
+    s.startY = 0;
+    s.lastX = 0;
+    s.lastY = 0;
+    s.dragging = false;
+    s.targetDayKey = '';
+    s.targetDateIso = '';
+    setDragUi({ active: false, dragging: false, x: 0, y: 0, workOrderId: null, targetDayKey: '' });
+  };
+
+  const findDropTarget = (clientX, clientY) => {
+    const el = document.elementFromPoint(clientX, clientY);
+    if (!el) return { dayKey: '', dateIso: '' };
+    const cell = el.closest?.('[data-cal-daykey]');
+    if (!cell) return { dayKey: '', dateIso: '' };
+    return {
+      dayKey: cell.getAttribute('data-cal-daykey') || '',
+      dateIso: cell.getAttribute('data-cal-dateonly') || cell.getAttribute('data-cal-dateiso') || '',
+    };
+  };
+
+  const dateOnlyToLocalDate = (dateOnly) => {
+    const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(String(dateOnly || '').trim());
+    if (!m) return null;
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const da = Number(m[3]);
+    if (!y || !mo || !da) return null;
+    const d = new Date(y, mo - 1, da);
+    if (Number.isNaN(d.getTime())) return null;
+    return d;
+  };
+
+  const onCalendarPointerMove = (e) => {
+    const s = dragStateRef.current;
+    if (!s.active) return;
+    if (s.pointerId !== null && e.pointerId !== s.pointerId) return;
+    s.lastX = e.clientX;
+    s.lastY = e.clientY;
+
+    const dx = Math.abs(e.clientX - s.startX);
+    const dy = Math.abs(e.clientY - s.startY);
+    if (!s.dragging && (dx > 6 || dy > 6)) {
+      s.dragging = true;
+    }
+
+    const t = findDropTarget(e.clientX, e.clientY);
+    s.targetDayKey = t.dayKey;
+    s.targetDateIso = t.dateIso;
+    scheduleDragUiUpdate();
+  };
+
+  const onCalendarPointerUp = async (e) => {
+    const s = dragStateRef.current;
+    if (!s.active) return;
+    if (s.pointerId !== null && e.pointerId !== s.pointerId) return;
+
+    const workOrderId = s.workOrderId;
+    const dragging = s.dragging;
+    const t = findDropTarget(e.clientX, e.clientY);
+    const dateIso = t.dateIso || s.targetDateIso;
+    clearDrag();
+
+    try {
+      window.removeEventListener('pointermove', onCalendarPointerMove);
+      window.removeEventListener('pointerup', onCalendarPointerUp);
+      window.removeEventListener('pointercancel', onCalendarPointerUp);
+    } catch {
+      // noop
+    }
+
+    if (!workOrderId) return;
+    if (!dragging) {
+      setViewMode('list');
+      setSelectedWorkOrderId(workOrderId);
+      return;
+    }
+    if (!dateIso) return;
+    const localDate = dateOnlyToLocalDate(dateIso);
+    if (!localDate) return;
+    await handleCalendarDrop(workOrderId, localDate);
+  };
 
   useEffect(() => {
     setApiProcedureDetailsById({});
@@ -571,10 +868,8 @@ const WorkOrders = () => {
   }, [selectedWorkOrderId]);
 
   const clearAllFilters = () => {
-    setFilters({ status: '', priority: '', asset: '', assignee: '', location: '', dueDatePreset: '', dueDateCustom: '', categoryId: '', part: '' });
+    setFilters({ status: '', priority: '', asset: '', dueDatePreset: '', dueDateCustom: '', categoryId: '', part: '' });
     setExtraFilterKeys([]);
-    setAssigneeSearch('');
-    setLocationSearch('');
     setOpenFilter('');
   };
 
@@ -625,7 +920,7 @@ const WorkOrders = () => {
       assetName: '',
       assetId: '',
       procedure: '',
-      assignee: '',
+      assigneeId: '',
       estimatedHours: '',
       estimatedMinutes: '',
       dueDate: '',
@@ -646,6 +941,7 @@ const WorkOrders = () => {
       categoryId: '',
       vendorId: '',
     });
+    setTeamUsers([]);
   };
 
   const openCreateWorkOrder = () => {
@@ -684,6 +980,7 @@ const WorkOrders = () => {
       assetName: wo.assetId ? String(getAssetName(wo.assetId) || '') : '',
       procedure: wo.procedure ? String(wo.procedure) : '',
       teamId: wo.teamId ? String(wo.teamId) : '',
+      assigneeId: wo.assigneeId ? String(wo.assigneeId) : '',
       status: normalizeStatus(wo.status),
       estimatedHours: String(hours || ''),
       estimatedMinutes: String(minutes || ''),
@@ -696,6 +993,12 @@ const WorkOrders = () => {
       vendorId: wo.vendorId ? String(wo.vendorId) : '',
       parts: wo.partId ? String(wo.partId) : '',
     }));
+
+    if (wo.teamId) {
+      fetchTeamUsers(String(wo.teamId));
+    } else {
+      setTeamUsers([]);
+    }
 
     setShowCreateModal(true);
   };
@@ -1027,6 +1330,7 @@ const WorkOrders = () => {
     const numericCategoryId = createForm.categoryId ? parseInt(String(createForm.categoryId), 10) : NaN;
     const numericVendorId = createForm.vendorId ? parseInt(String(createForm.vendorId), 10) : NaN;
     const numericPartId = createForm.parts ? parseInt(String(createForm.parts), 10) : NaN;
+    const numericAssigneeId = createForm.assigneeId ? parseInt(String(createForm.assigneeId), 10) : NaN;
 
     const apiPayload = {
       name: title,
@@ -1041,6 +1345,7 @@ const WorkOrders = () => {
       priority: createForm.priority,
       location: location?.name || locationName,
       team_id: teamId ? parseInt(teamId, 10) : null,
+      assignee_id: Number.isFinite(numericAssigneeId) ? numericAssigneeId : null,
       asset_id: assetId ? parseInt(assetId, 10) : null,
       procedure_id: hasNumericProcedureId ? numericProcedureId : null,
       vendor_id: Number.isFinite(numericVendorId) ? numericVendorId : null,
@@ -1109,7 +1414,7 @@ const WorkOrders = () => {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
@@ -1167,52 +1472,6 @@ const WorkOrders = () => {
             <div className="inline-flex items-center gap-2 px-2 py-1 border border-gray-200 rounded-md text-sm text-gray-700 bg-white">
               <SlidersHorizontal className="h-4 w-4 text-gray-400" />
               <span className="text-xs font-medium">Filters</span>
-            </div>
-
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setOpenFilter(openFilter === 'assignee' ? '' : 'assignee')}
-                className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
-              >
-                <User className="h-4 w-4 text-gray-500" />
-                Assigned To
-                <ChevronDown className="h-4 w-4 text-gray-400" />
-              </button>
-
-              {openFilter === 'assignee' && (
-                <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
-                  <div className="p-2 border-b border-gray-100">
-                    <input
-                      value={assigneeSearch}
-                      onChange={(e) => setAssigneeSearch(e.target.value)}
-                      placeholder="Search"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 text-sm bg-white"
-                    />
-                  </div>
-                  <div className="max-h-64 overflow-y-auto">
-                    <button
-                      type="button"
-                      onClick={() => { setFilters((p) => ({ ...p, assignee: '' })); setOpenFilter(''); }}
-                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                    >
-                      Unassigned / Any
-                    </button>
-                    {users
-                      .filter((u) => (u?.name || '').toLowerCase().includes(assigneeSearch.toLowerCase()) || (u?.email || '').toLowerCase().includes(assigneeSearch.toLowerCase()))
-                      .map((u) => (
-                        <button
-                          key={u.id}
-                          type="button"
-                          onClick={() => { setFilters((p) => ({ ...p, assignee: u.id })); setOpenFilter(''); }}
-                          className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                        >
-                          {u.name}
-                        </button>
-                      ))}
-                  </div>
-                </div>
-              )}
             </div>
 
             <div className="relative">
@@ -1278,52 +1537,6 @@ const WorkOrders = () => {
             <div className="relative">
               <button
                 type="button"
-                onClick={() => setOpenFilter(openFilter === 'location' ? '' : 'location')}
-                className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
-              >
-                <MapPin className="h-4 w-4 text-gray-500" />
-                Location
-                <ChevronDown className="h-4 w-4 text-gray-400" />
-              </button>
-
-              {openFilter === 'location' && (
-                <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
-                  <div className="p-2 border-b border-gray-100">
-                    <input
-                      value={locationSearch}
-                      onChange={(e) => setLocationSearch(e.target.value)}
-                      placeholder="Search"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 text-sm bg-white"
-                    />
-                  </div>
-                  <div className="max-h-64 overflow-y-auto">
-                    <button
-                      type="button"
-                      onClick={() => { setFilters((p) => ({ ...p, location: '' })); setOpenFilter(''); }}
-                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                    >
-                      Any
-                    </button>
-                    {locations
-                      .filter((l) => (l?.name || '').toLowerCase().includes(locationSearch.toLowerCase()))
-                      .map((l) => (
-                        <button
-                          key={l.id}
-                          type="button"
-                          onClick={() => { setFilters((p) => ({ ...p, location: l.id })); setOpenFilter(''); }}
-                          className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                        >
-                          {l.name}
-                        </button>
-                      ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="relative">
-              <button
-                type="button"
                 onClick={() => setOpenFilter(openFilter === 'priority' ? '' : 'priority')}
                 className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
               >
@@ -1349,42 +1562,6 @@ const WorkOrders = () => {
                       {opt.label}
                     </button>
                   ))}
-                </div>
-              )}
-            </div>
-
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setOpenFilter(openFilter === 'addFilter' ? '' : 'addFilter')}
-                className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
-              >
-                <span className="text-lg leading-none">+</span>
-                Add Filter
-              </button>
-
-              {openFilter === 'addFilter' && (
-                <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
-                  <div className="max-h-72 overflow-y-auto p-2">
-                    {[
-                      { key: 'asset', label: 'Asset' },
-                      { key: 'status', label: 'Status' },
-                      { key: 'categoryId', label: 'Category' },
-                      { key: 'part', label: 'Part' },
-                    ].filter((f) => !extraFilterKeys.includes(f.key)).map((f) => (
-                      <button
-                        key={f.key}
-                        type="button"
-                        onClick={() => { setExtraFilterKeys((p) => [...p, f.key]); setOpenFilter(''); }}
-                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded"
-                      >
-                        {f.label}
-                      </button>
-                    ))}
-                    {extraFilterKeys.length === 4 && (
-                      <div className="px-3 py-2 text-sm text-gray-500">No more filters</div>
-                    )}
-                  </div>
                 </div>
               )}
             </div>
@@ -1533,8 +1710,8 @@ const WorkOrders = () => {
             </button>
           </div>
 
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => { setActiveTab('todo'); setSelectedWorkOrderId(null); }}
@@ -1551,25 +1728,215 @@ const WorkOrders = () => {
               </button>
             </div>
 
-            <div className="relative">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="appearance-none pl-3 pr-8 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 focus:ring-primary-500 focus:border-primary-500"
-              >
-                <option value="priority_desc">Sort: Priority (High - Low)</option>
-                <option value="priority_asc">Sort: Priority (Low - High)</option>
-                <option value="due_asc">Sort: Due Date (Soonest)</option>
-                <option value="due_desc">Sort: Due Date (Latest)</option>
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <div className="flex items-center gap-2">
+              <div className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white p-1">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium ${viewMode === 'list' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-50'}`}
+                >
+                  List
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setViewMode('calendar'); setSelectedWorkOrderId(null); }}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium ${viewMode === 'calendar' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-50'}`}
+                >
+                  Calendar
+                </button>
+              </div>
+
+              {viewMode === 'calendar' ? (
+                <div className="inline-flex items-center gap-2">
+                  <div className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white p-1">
+                    <button
+                      type="button"
+                      onClick={() => setCalendarMode('month')}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium ${calendarMode === 'month' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-50'}`}
+                    >
+                      Month
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCalendarMode('week')}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium ${calendarMode === 'week' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-50'}`}
+                    >
+                      Week
+                    </button>
+                  </div>
+
+                  <div className="inline-flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCalendarAnchorDate((prev) => {
+                          const d = new Date(prev);
+                          if (calendarMode === 'week') d.setDate(d.getDate() - 7);
+                          else d.setMonth(d.getMonth() - 1);
+                          return d;
+                        });
+                      }}
+                      className="px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      Prev
+                    </button>
+                    <div className="text-sm font-medium text-gray-900 min-w-[140px] text-center">
+                      {calendarAnchorDate.toLocaleString(undefined, { month: 'long', year: 'numeric' })}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCalendarAnchorDate((prev) => {
+                          const d = new Date(prev);
+                          if (calendarMode === 'week') d.setDate(d.getDate() + 7);
+                          else d.setMonth(d.getMonth() + 1);
+                          return d;
+                        });
+                      }}
+                      className="px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="relative">
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="appearance-none pl-3 pr-8 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 focus:ring-primary-500 focus:border-primary-500"
+                  >
+                    <option value="priority_desc">Sort: Priority (High - Low)</option>
+                    <option value="priority_asc">Sort: Priority (Low - High)</option>
+                    <option value="due_asc">Sort: Due Date (Soonest)</option>
+                    <option value="due_desc">Sort: Due Date (Latest)</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Split view */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      {viewMode === 'calendar' ? (
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden relative">
+          <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50">
+            {['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'].map((d) => (
+              <div key={d} className="px-3 py-2 text-[11px] font-semibold text-gray-500 tracking-wider">
+                {d}
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7">
+            {calendarDays.map((d) => {
+              const key = dayKey(d);
+              const items = workOrdersByDay.get(key) || [];
+              const inMonth = d.getMonth() === calendarAnchorDate.getMonth();
+              const today = new Date();
+              const isToday = d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+              const dateIso = toDateOnlyIso(d);
+              const isDropTarget = Boolean(dragUi?.dragging) && String(dragUi?.targetDayKey || '') === String(key);
+              return (
+                <div
+                  key={key}
+                  data-cal-daykey={key}
+                  data-cal-dateiso={dateIso}
+                  data-cal-dateonly={key}
+                  className={`min-h-[140px] border-r border-b border-gray-200 p-2 transition-colors ${
+                    inMonth ? 'bg-white' : 'bg-gray-50/60'
+                  } ${isDropTarget ? 'bg-primary-50' : ''}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className={`text-xs font-semibold ${isToday ? 'text-primary-700' : (inMonth ? 'text-gray-900' : 'text-gray-400')}`}>{d.getDate()}</div>
+                    {items.length > 0 ? (
+                      <div className="text-[11px] text-gray-500">{items.length}</div>
+                    ) : null}
+                  </div>
+                  <div className="mt-2 space-y-1">
+                    {items.slice(0, 4).map((wo) => (
+                      <button
+                        key={wo.id}
+                        type="button"
+                        onPointerDown={(e) => {
+                          if (viewMode !== 'calendar') return;
+                          e.preventDefault();
+                          e.stopPropagation();
+
+                          try {
+                            e.currentTarget.setPointerCapture(e.pointerId);
+                          } catch {
+                            // ignore
+                          }
+
+                          const s = dragStateRef.current;
+                          s.active = true;
+                          s.pointerId = e.pointerId;
+                          s.workOrderId = wo.id;
+                          s.startX = e.clientX;
+                          s.startY = e.clientY;
+                          s.lastX = e.clientX;
+                          s.lastY = e.clientY;
+                          s.dragging = false;
+
+                          const t = findDropTarget(e.clientX, e.clientY);
+                          s.targetDayKey = t.dayKey;
+                          s.targetDateIso = t.dateIso;
+                          setDragUi({
+                            active: true,
+                            dragging: false,
+                            x: e.clientX,
+                            y: e.clientY,
+                            workOrderId: wo.id,
+                            targetDayKey: t.dayKey,
+                          });
+
+                          window.addEventListener('pointermove', onCalendarPointerMove);
+                          window.addEventListener('pointerup', onCalendarPointerUp);
+                          window.addEventListener('pointercancel', onCalendarPointerUp);
+                        }}
+                        style={{ touchAction: 'none' }}
+                        className={`w-full text-left px-2 py-1 rounded border bg-white hover:bg-gray-50 transition-colors border-gray-200 cursor-grab active:cursor-grabbing ${
+                          dragUi?.dragging && String(dragUi?.workOrderId || '') === String(wo.id) ? 'opacity-0' : ''
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-xs font-medium text-gray-900 truncate">{wo.title || wo.id}</div>
+                          <div className="shrink-0">{getPriorityBadge(wo.priority)}</div>
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-gray-500">
+                          <span className="font-medium">Start:</span> {formatShort(wo?.startDate || wo?.scheduledDate) || '—'}
+                          {'  '}
+                          <span className="font-medium">Due:</span> {formatShort(wo?.dueDate) || '—'}
+                        </div>
+                      </button>
+                    ))}
+                    {items.length > 4 ? (
+                      <div className="text-[11px] text-gray-500">+{items.length - 4} more</div>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {dragUi?.active ? (
+            <div
+              className="fixed z-[9999] pointer-events-none"
+              style={{ left: `${Number(dragUi.x || 0) + 12}px`, top: `${Number(dragUi.y || 0) + 12}px` }}
+            >
+              <div className="w-60 px-2 py-1 rounded border border-primary-300 bg-white shadow-lg opacity-95">
+                <div className="text-xs font-medium text-gray-900 truncate">
+                  {(workOrders || []).find((wo) => String(wo?.id) === String(dragUi.workOrderId))?.title || String(dragUi.workOrderId || '')}
+                </div>
+                <div className="text-[11px] text-gray-500">Drop on a date to reschedule</div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Left list */}
         <div className="lg:col-span-4 bg-white border border-gray-200 rounded-lg overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
@@ -1853,6 +2220,7 @@ const WorkOrders = () => {
           )}
         </div>
       </div>
+      )}
 
       {/* Create Work Order Modal */}
       <Modal
@@ -1948,7 +2316,11 @@ const WorkOrders = () => {
             <div className="relative">
               <select
                 value={createForm.teamId}
-                onChange={(e) => setCreateForm((p) => ({ ...p, teamId: e.target.value }))}
+                onChange={(e) => {
+                  const nextTeamId = e.target.value;
+                  setCreateForm((p) => ({ ...p, teamId: nextTeamId, assigneeId: '' }));
+                  fetchTeamUsers(nextTeamId);
+                }}
                 className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
               >
                 <option value="">Select Team</option>
@@ -2015,16 +2387,21 @@ const WorkOrders = () => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Assign to
-            </label>
-            <input
-              type="text"
-              value={createForm.assignee}
-              onChange={(e) => setCreateForm((p) => ({ ...p, assignee: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
-              placeholder="Type name or email address"
-            />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Assigned To</label>
+            <div className="relative">
+              <select
+                value={createForm.assigneeId}
+                onChange={(e) => setCreateForm((p) => ({ ...p, assigneeId: e.target.value }))}
+                className="w-full appearance-none px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 bg-white"
+                disabled={!createForm.teamId || loadingTeamUsers}
+              >
+                <option value="">{loadingTeamUsers ? 'Loading users…' : (!createForm.teamId ? 'Select Team first' : 'Select User')}</option>
+                {(teamUsers || []).map((u) => (
+                  <option key={u.id} value={u.id}>{u.user_name || u.name || String(u.id)}</option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            </div>
           </div>
 
           <div>

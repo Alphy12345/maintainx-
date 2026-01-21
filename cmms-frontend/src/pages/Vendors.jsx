@@ -35,8 +35,9 @@ const Vendors = () => {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return vendors;
-    return vendors.filter((v) => String(v?.name || '').toLowerCase().includes(q));
+    const rows = vendors || [];
+    if (!q) return rows;
+    return rows.filter((v) => String(v?.name || '').toLowerCase().includes(q));
   }, [query, vendors]);
 
   const handleDelete = async (id) => {
@@ -57,7 +58,6 @@ const Vendors = () => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-gray-900">Vendors</h1>
-          <div className="text-xs text-gray-500">Panel View</div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -79,29 +79,14 @@ const Vendors = () => {
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <button type="button" className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50">
-          Asset
-        </button>
-        <button type="button" className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50">
-          Location
-        </button>
-        <button type="button" className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50">
-          Part
-        </button>
-        <button type="button" className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50">
-          Vendor Types
-        </button>
-      </div>
-
       <div className="bg-white rounded-lg border border-gray-200 min-h-[640px]">
         {error ? (
-          <div className="p-4 border-b border-gray-200 bg-red-50 text-red-700 text-sm flex items-center justify-between">
-            <div>{error}</div>
+          <div className="p-4">
+            <div className="text-sm text-red-600">{error}</div>
             <button
               type="button"
               onClick={() => fetchVendors()}
-              className="text-sm font-medium text-red-700 hover:text-red-800"
+              className="mt-2 text-sm text-primary-600 hover:text-primary-700 font-medium"
             >
               Retry
             </button>

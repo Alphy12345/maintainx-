@@ -1,8 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Edit2, MoreVertical, Plus, Search, Tag } from 'lucide-react';
+import { Edit2, MoreVertical, Plus, Search, Tag, Trash2 } from 'lucide-react';
+import axios from 'axios';
 import { Button, Card, Modal } from '../components';
 import useStore from '../store/useStore';
+
+const API_BASE_URL = 'http://172.18.100.33:8000';
 
 const iconClasses = [
   'bg-orange-50 text-orange-600 border-orange-200',
@@ -26,9 +29,11 @@ const formatDateTime = (iso) => {
 };
 
 const Categories = () => {
-  const { categories, addCategory, updateCategory } = useStore();
+  const { categories, addCategory, updateCategory, deleteCategory } = useStore();
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(categories?.[0]?.id || '');
+  const [error, setError] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
@@ -73,6 +78,31 @@ const Categories = () => {
     setShowEdit(false);
   };
 
+  const handleDelete = async () => {
+    if (!selected?.id) return;
+    const ok = window.confirm('Delete this category?');
+    if (!ok) return;
+    setError('');
+    setDeleting(true);
+    try {
+      const idStr = String(selected.id);
+      const isNumericId = /^\d+$/.test(idStr);
+      if (isNumericId) {
+        await axios.delete(`${API_BASE_URL}/categories/${idStr}`, {
+          headers: { accept: '*/*' },
+        });
+      }
+      deleteCategory(selected.id);
+
+      const remaining = (categories || []).filter((c) => c.id !== selected.id);
+      setSelectedId(remaining?.[0]?.id || '');
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to delete category');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -87,6 +117,19 @@ const Categories = () => {
               className="w-80 pl-9 pr-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
             />
           </div>
+
+      {error ? (
+        <div className="p-4 rounded-md border border-red-200 bg-red-50 text-red-700 text-sm flex items-center justify-between">
+          <div>{error}</div>
+          <button
+            type="button"
+            onClick={() => setError('')}
+            className="text-sm font-medium text-red-700 hover:text-red-800"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
           <Button onClick={openCreate}>
             <Plus className="w-4 h-4 mr-2" />
             New Category
@@ -131,6 +174,10 @@ const Categories = () => {
                   <Button variant="secondary" onClick={openEdit}>
                     <Edit2 className="w-4 h-4 mr-2" />
                     Edit
+                  </Button>
+                  <Button variant="secondary" onClick={handleDelete} disabled={deleting}>
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    {deleting ? 'Deleting…' : 'Delete'}
                   </Button>
                   <button
                     type="button"

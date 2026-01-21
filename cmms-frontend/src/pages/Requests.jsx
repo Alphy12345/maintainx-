@@ -30,8 +30,7 @@ const Requests = () => {
   const [filters, setFilters] = useState({
     status: '',
     priority: '',
-    asset: '',
-    location: ''
+    asset: ''
   });
 
   const fileInputRef = useRef(null);
@@ -113,13 +112,12 @@ const Requests = () => {
       const matchesStatus = !filters.status || r.status === filters.status;
       const matchesPriority = !filters.priority || r.priority === filters.priority;
       const matchesAsset = !filters.asset || r.assetId === filters.asset;
-      const matchesLocation = !filters.location || r.locationId === filters.location;
 
-      return matchesSearch && matchesTab && matchesStatus && matchesPriority && matchesAsset && matchesLocation;
+      return matchesSearch && matchesTab && matchesStatus && matchesPriority && matchesAsset;
     })
     .sort((a, b) => {
       if (sortBy === 'created_desc') return new Date(b.createdAt || '1970-01-01').getTime() - new Date(a.createdAt || '1970-01-01').getTime();
-      if (sortBy === 'created_asc') return new Date(a.createdAt || '2999-12-31').getTime() - new Date(b.createdAt || '2999-12-31').getTime();
+      if (sortBy === 'created_asc') return new Date(a.createdAt || '1970-01-01').getTime() - new Date(b.createdAt || '1970-01-01').getTime();
       if (sortBy === 'priority_desc') {
         const rank = { critical: 4, high: 3, medium: 2, low: 1 };
         return (rank[b.priority] || 0) - (rank[a.priority] || 0);
@@ -298,20 +296,6 @@ const Requests = () => {
 
             <div className="relative">
               <select
-                value={filters.location}
-                onChange={(e) => setFilters({ ...filters, location: e.target.value })}
-                className="appearance-none pl-3 pr-8 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 focus:ring-primary-500 focus:border-primary-500"
-              >
-                <option value="">Location</option>
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>{l.name}</option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            </div>
-
-            <div className="relative">
-              <select
                 value={filters.asset}
                 onChange={(e) => setFilters({ ...filters, asset: e.target.value })}
                 className="appearance-none pl-3 pr-8 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-700 focus:ring-primary-500 focus:border-primary-500"
@@ -359,7 +343,7 @@ const Requests = () => {
 
             <button
               type="button"
-              onClick={() => setFilters({ status: '', priority: '', asset: '', location: '' })}
+              onClick={() => setFilters({ status: '', priority: '', asset: '' })}
               className="px-3 py-1.5 border border-gray-200 rounded-md bg-white text-sm text-gray-600 hover:bg-gray-50"
             >
               Clear

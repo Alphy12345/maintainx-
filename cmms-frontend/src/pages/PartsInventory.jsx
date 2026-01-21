@@ -20,10 +20,14 @@ const PartsInventory = () => {
   const [search, setSearch] = useState('');
   const [parts, setParts] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [assets, setAssets] = useState([]);
   const [selectedPart, setSelectedPart] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [openFilter, setOpenFilter] = useState('');
+  const [filters, setFilters] = useState({ needsRestock: false, assetId: '', vendorId: '' });
+  const [loadingFilterOptions, setLoadingFilterOptions] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [mode, setMode] = useState('create');
   const [form, setForm] = useState({
@@ -54,6 +58,22 @@ const PartsInventory = () => {
     }
   };
 
+  const fetchFilterOptions = async () => {
+    setLoadingFilterOptions(true);
+    try {
+      const [assetsRes] = await Promise.allSettled([
+        axios.get(`${API_BASE_URL}/assets`, { headers: { accept: 'application/json' } }),
+      ]);
+
+      if (assetsRes.status === 'fulfilled') setAssets(Array.isArray(assetsRes.value?.data) ? assetsRes.value.data : []);
+      else setAssets([]);
+    } catch {
+      setAssets([]);
+    } finally {
+      setLoadingFilterOptions(false);
+    }
+  };
+
   const fetchParts = async () => {
     setLoading(true);
     setError('');
@@ -76,6 +96,7 @@ const PartsInventory = () => {
 
   useEffect(() => {
     fetchVendors();
+    fetchFilterOptions();
     fetchParts();
   }, []);
 
@@ -173,14 +194,29 @@ const PartsInventory = () => {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = parts || [];
+    let list = parts || [];
+
+    if (filters.needsRestock) {
+      list = list.filter((p) => Number(p?.units_in_stock) <= Number(p?.minimum_in_stock));
+    }
+    if (filters.vendorId) {
+      const id = String(filters.vendorId);
+      list = list.filter((p) => String(p?.vendor_id || '') === id);
+    }
+    if (filters.assetId) {
+      const id = String(filters.assetId);
+      list = list.filter((p) => String(p?.asset_id || p?.assetId || '') === id);
+    }
+
     if (!q) return list;
     return list.filter((p) => {
       const vendorName = vendorById.get(p.vendor_id)?.name || '';
       const hay = `${p.name || ''} ${p.part_type || ''} ${p.location || ''} ${vendorName}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [parts, search, vendorById]);
+  }, [parts, search, vendorById, filters]);
+
+  const anyFilterActive = Boolean(filters.needsRestock || filters.assetId || filters.vendorId);
 
   const isEmpty = filtered.length === 0;
 
@@ -190,9 +226,6 @@ const PartsInventory = () => {
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-gray-900">Parts</h1>
           <div className="text-sm text-gray-600">00</div>
-          <button type="button" className="text-sm text-gray-700 hover:text-gray-900 inline-flex items-center gap-1">
-            Panel View <ChevronDown className="h-4 w-4 text-gray-400" />
-          </button>
         </div>
 
         <div className="flex items-center gap-3">
@@ -229,19 +262,100 @@ const PartsInventory = () => {
       <Card className="p-4">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
-            <button type="button" className={chipBase}>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setFilters((p) => ({ ...p, needsRestock: !p.needsRestock }))}
+                className={`${chipBase} ${filters.needsRestock ? 'border-primary-300 text-primary-700' : ''}`}
+              >
               <Filter className="h-4 w-4 text-gray-400" />
               Needs Restock
-            </button>
-            <button type="button" className={chipBase}>Part Types</button>
-            <button type="button" className={chipBase}>Location</button>
-            <button type="button" className={chipBase}>Asset</button>
-            <button type="button" className={chipBase}>Vendor</button>
-            <button type="button" className={chipBase}>Area</button>
-            <button type="button" className={chipBase}>
-              <Plus className="h-4 w-4 text-gray-400" />
-              Add Filter
-            </button>
+              </button>
+            </div>
+
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'asset' ? '' : 'asset')}
+                className={`${chipBase} ${filters.assetId ? 'border-primary-300 text-primary-700' : ''}`}
+              >
+                Asset
+                <ChevronDown className="h-4 w-4 text-gray-400" />
+              </button>
+              {openFilter === 'asset' ? (
+                <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+                  <div className="max-h-64 overflow-y-auto">
+                    <button
+                      type="button"
+                      onClick={() => { setFilters((p) => ({ ...p, assetId: '' })); setOpenFilter(''); }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      Any
+                    </button>
+                    {loadingFilterOptions && assets.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-gray-500">Loading…</div>
+                    ) : null}
+                    {!loadingFilterOptions && assets.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-gray-500">No assets</div>
+                    ) : null}
+                    {assets.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => { setFilters((p) => ({ ...p, assetId: String(a.id) })); setOpenFilter(''); }}
+                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        {a.asset_name || a.name || String(a.id)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenFilter(openFilter === 'vendor' ? '' : 'vendor')}
+                className={`${chipBase} ${filters.vendorId ? 'border-primary-300 text-primary-700' : ''}`}
+              >
+                Vendor
+                <ChevronDown className="h-4 w-4 text-gray-400" />
+              </button>
+              {openFilter === 'vendor' ? (
+                <div className="absolute z-50 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg overflow-hidden">
+                  <div className="max-h-64 overflow-y-auto">
+                    <button
+                      type="button"
+                      onClick={() => { setFilters((p) => ({ ...p, vendorId: '' })); setOpenFilter(''); }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      Any
+                    </button>
+                    {vendors.map((v) => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => { setFilters((p) => ({ ...p, vendorId: String(v.id) })); setOpenFilter(''); }}
+                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        {v.name || String(v.id)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {anyFilterActive ? (
+              <button
+                type="button"
+                onClick={() => { setFilters({ needsRestock: false, assetId: '', vendorId: '' }); setOpenFilter(''); }}
+                className={chipBase}
+              >
+                Clear Filters
+              </button>
+            ) : null}
           </div>
 
           <button type="button" className={chipBase}>

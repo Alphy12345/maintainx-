@@ -42,10 +42,6 @@ const WorkOrderTemplates = () => {
         <button type="button" className={chipBase}>Asset Types</button>
         <button type="button" className={chipBase}>Category</button>
         <button type="button" className={chipBase}>Procedure</button>
-        <button type="button" className={chipBase}>
-          <Plus className="h-4 w-4 text-gray-400" />
-          Add Filter
-        </button>
       </div>
 
       <Card className="min-h-[60vh] flex items-center justify-center">

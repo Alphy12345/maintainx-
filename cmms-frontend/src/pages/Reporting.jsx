@@ -13,11 +13,12 @@ import {
   CartesianGrid,
   Tooltip,
 } from 'recharts';
-import { Calendar, ChevronDown, Download, Plus, Filter } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import { Button, Card, CardBody, CardHeader, Modal, Table, Badge } from '../components';
+import { Calendar, ChevronDown, Download, Filter } from 'lucide-react';
+import { Button, Card, CardBody, CardHeader, Table, Badge } from '../components';
 import useStore from '../store/useStore';
 import axios from 'axios';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const API_BASE_URL = 'http://172.18.100.33:8000';
 
@@ -35,12 +36,6 @@ const normalizeWorkOrderStatus = (raw) => {
   if (s === 'open') return 'open';
   return s;
 };
-
-const datePresets = [
-  { id: 'today', label: 'Today', days: 0 },
-  { id: 'last_7', label: 'Last 7 days', days: 6 },
-  { id: 'last_30', label: 'Last 30 days', days: 29 },
-];
 
 const tabs = [
   { id: 'work_orders', label: 'Work Orders' },
@@ -66,7 +61,6 @@ const Gauge = ({ label, valueText }) => (
 );
 
 const Reporting = () => {
-  const navigate = useNavigate();
   const { assets, locations, users, assetHealthEvents, inventory } = useStore();
 
   const [apiWorkOrders, setApiWorkOrders] = useState([]);
@@ -96,10 +90,7 @@ const Reporting = () => {
     return { start: formatInputDate(start), end: formatInputDate(end) };
   });
 
-  const [filters, setFilters] = useState({ assignedTo: '', dueDate: '', locationId: '', priority: '' });
-  const [showAddFilter, setShowAddFilter] = useState(false);
-  const [showExport, setShowExport] = useState(false);
-  const [showPresets, setShowPresets] = useState(false);
+  const [filters, setFilters] = useState({ assignedTo: '', dueDate: '', priority: '' });
 
   useEffect(() => {
     if (!EXPORT_SECTIONS.includes(exportSection)) {
@@ -204,47 +195,28 @@ const Reporting = () => {
     URL.revokeObjectURL(url);
   };
 
-  const openPrintView = (title, rows) => {
+  const downloadPdf = (filenameBase, title, rows) => {
     const safeRows = Array.isArray(rows) ? rows : [];
     const headers = safeRows.length ? Object.keys(safeRows[0]) : [];
-    const win = window.open('', '_blank', 'noopener,noreferrer');
-    if (!win) return;
+    const body = safeRows.map((r) => headers.map((h) => String(r?.[h] ?? '')));
 
-    const html = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>${title}</title>
-  <style>
-    body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
-    h1 { font-size: 18px; margin: 0 0 8px; }
-    .meta { font-size: 12px; color: #555; margin-bottom: 16px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border: 1px solid #ddd; padding: 8px; font-size: 12px; text-align: left; vertical-align: top; }
-    th { background: #f5f5f5; }
-  </style>
-</head>
-<body>
-  <h1>${title}</h1>
-  <div class="meta">${exportDateRangeText ? `Date Range: ${exportDateRangeText}` : ''}</div>
-  <table>
-    <thead>
-      <tr>
-        ${headers.map((h) => `<th>${h}</th>`).join('')}
-      </tr>
-    </thead>
-    <tbody>
-      ${safeRows.map((r) => `<tr>${headers.map((h) => `<td>${(r[h] ?? '').toString().replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>`).join('')}</tr>`).join('')}
-    </tbody>
-  </table>
-</body>
-</html>`;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    doc.setFontSize(14);
+    doc.text(String(title || 'Export'), 40, 40);
+    if (exportDateRangeText) {
+      doc.setFontSize(10);
+      doc.text(`Date Range: ${exportDateRangeText}`, 40, 58);
+    }
 
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
-    win.focus();
-    win.print();
+    autoTable(doc, {
+      head: headers.length ? [headers] : [['No data']],
+      body: headers.length ? body : [],
+      startY: exportDateRangeText ? 72 : 60,
+      styles: { fontSize: 8, cellPadding: 4 },
+      headStyles: { fillColor: [245, 245, 245], textColor: 20 },
+    });
+
+    doc.save(`${filenameBase}.pdf`);
   };
 
   const buildExportRows = () => {
@@ -340,12 +312,16 @@ const Reporting = () => {
     };
     const title = titleMap[exportSection] || 'Export';
 
+    const s = exportForm.start || dateRange.start;
+    const e = exportForm.end || dateRange.end;
+    const baseName = `report-${exportSection}-${s}_${e}`;
+
     if (exportForm.format === 'pdf' || exportForm.format === 'qr_pdf') {
-      openPrintView(`Export: ${title}`, rows);
+      downloadPdf(baseName, `Export: ${title}`, rows);
       return;
     }
 
-    downloadCsv(`export-${exportSection}-${(exportForm.start || dateRange.start)}_${(exportForm.end || dateRange.end)}`, rows);
+    downloadCsv(baseName, rows);
   };
 
   const inRange = (iso) => {
@@ -359,7 +335,6 @@ const Reporting = () => {
       const createdAt = wo.createdAt || wo.startDate || wo.dueDate;
       if (!inRange(createdAt)) return false;
       if (filters.assignedTo && wo.assigneeId !== filters.assignedTo) return false;
-      if (filters.locationId && wo.locationId !== filters.locationId) return false;
       if (filters.priority && wo.priority !== filters.priority) return false;
       if (filters.dueDate) {
         const due = wo.dueDate ? formatInputDate(new Date(wo.dueDate)) : '';
@@ -531,135 +506,13 @@ const Reporting = () => {
     { key: 'recurrence', title: 'Recurrence', sortable: true },
   ]), [users, assets, locations]);
 
-  const applyPreset = (preset) => {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - preset.days);
-    setDateRange({ start: formatInputDate(start), end: formatInputDate(end) });
-    setShowPresets(false);
-  };
-
-  const clearFilters = () => setFilters({ assignedTo: '', dueDate: '', locationId: '', priority: '' });
-
-  const headerExportSection = useMemo(() => {
-    return 'work_orders';
-  }, [activeTab]);
-
-  const exportAction = (type) => {
-    setShowExport(false);
-    const resolvedFormat = type === 'PDF' ? 'pdf' : 'csv';
-    const section = headerExportSection;
-
-    const s = dateRange.start;
-    const e = dateRange.end;
-    const start = new Date(`${s}T00:00:00`);
-    const end = new Date(`${e}T23:59:59`);
-    const inHeaderRange = (iso) => {
-      if (!iso) return false;
-      const d = new Date(iso);
-      return d >= start && d <= end;
-    };
-
-    const assetName = (id) => (assets || []).find((a) => a.id === id)?.name || '';
-    const locationName = (id) => (locations || []).find((l) => l.id === id)?.name || '';
-    const userName = (id) => (users || []).find((u) => u.id === id)?.name || '';
-
-    const rows = (() => {
-      if (section === 'asset_status') {
-        const list = (assetHealthEvents || []).filter((ev) => inHeaderRange(ev.timestamp));
-        return list.map((ev) => ({
-          Asset: assetName(ev.assetId),
-          Status: ev.status,
-          DowntimeType: ev.downtimeType || '',
-          DowntimeReason: ev.downtimeReason || '',
-          Timestamp: ev.timestamp ? new Date(ev.timestamp).toLocaleString() : '',
-        }));
-      }
-
-      const list = (apiWorkOrders || []).filter((wo) => {
-        const createdOk = inHeaderRange(wo.createdAt || wo.startDate || wo.dueDate);
-        const completedOk = inHeaderRange(wo.completedAt);
-        const dueOk = inHeaderRange(wo.dueDate);
-        return createdOk || completedOk || dueOk;
-      });
-      return list.map((wo) => ({
-        ID: wo.id,
-        Title: wo.title,
-        Status: wo.status,
-        Priority: wo.priority,
-        WorkType: wo.workType,
-        Asset: assetName(wo.assetId),
-        Location: locationName(wo.locationId),
-        AssignedTo: userName(wo.assigneeId),
-        DueDate: wo.dueDate ? new Date(wo.dueDate).toLocaleDateString() : '',
-        CreatedAt: wo.createdAt ? new Date(wo.createdAt).toLocaleString() : '',
-        CompletedAt: wo.completedAt ? new Date(wo.completedAt).toLocaleString() : '',
-      }));
-    })();
-
-    const baseName = `report-${section}-${s}_${e}`;
-    if (resolvedFormat === 'pdf') {
-      openPrintView(`Report: ${section.replace(/_/g, ' ')}`, rows);
-      return;
-    }
-
-    downloadCsv(baseName, rows);
-  };
+  const clearFilters = () => setFilters({ assignedTo: '', dueDate: '', priority: '' });
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-2xl font-bold text-gray-900">Reporting</h1>
-
-          <div className="flex items-center gap-2">
-            <div className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
-              <Calendar className="h-4 w-4 text-gray-400" />
-              <input type="date" value={dateRange.start} onChange={(e) => setDateRange((p) => ({ ...p, start: e.target.value }))} className="bg-transparent outline-none" />
-              <span className="text-gray-300">-</span>
-              <input type="date" value={dateRange.end} onChange={(e) => setDateRange((p) => ({ ...p, end: e.target.value }))} className="bg-transparent outline-none" />
-            </div>
-
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowPresets((v) => !v)}
-                className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                Date Presets
-                <ChevronDown className="h-4 w-4 text-gray-400" />
-              </button>
-              {showPresets && (
-                <div className="absolute right-0 mt-2 w-48 rounded-md border border-gray-200 bg-white shadow-lg z-10">
-                  {datePresets.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => applyPreset(p)}
-                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="relative">
-              <Button variant="secondary" onClick={() => setShowExport((v) => !v)}>
-                <Download className="w-4 h-4 mr-2" />
-                Export
-                <ChevronDown className="w-4 h-4 ml-2" />
-              </Button>
-              {showExport && (
-                <div className="absolute right-0 mt-2 w-44 rounded-md border border-gray-200 bg-white shadow-lg z-20 overflow-hidden">
-                  <button type="button" className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50" onClick={() => exportAction('CSV')}>Export CSV</button>
-                  <button type="button" className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50" onClick={() => exportAction('XLSX')}>Export XLSX</button>
-                  <button type="button" className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50" onClick={() => exportAction('PDF')}>Export PDF</button>
-                </div>
-              )}
-            </div>
-          </div>
         </div>
 
         <div className="border-b border-gray-200">
@@ -696,16 +549,6 @@ const Reporting = () => {
           <input type="date" value={filters.dueDate} onChange={(e) => setFilters((p) => ({ ...p, dueDate: e.target.value }))} className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700" />
 
           <div className="relative">
-            <select value={filters.locationId} onChange={(e) => setFilters((p) => ({ ...p, locationId: e.target.value }))} className="appearance-none rounded-md border border-gray-200 bg-white px-3 py-1.5 pr-8 text-sm text-gray-700">
-              <option value="">Location</option>
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>{l.name}</option>
-              ))}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          </div>
-
-          <div className="relative">
             <select value={filters.priority} onChange={(e) => setFilters((p) => ({ ...p, priority: e.target.value }))} className="appearance-none rounded-md border border-gray-200 bg-white px-3 py-1.5 pr-8 text-sm text-gray-700">
               <option value="">Priority</option>
               <option value="low">Low</option>
@@ -715,11 +558,6 @@ const Reporting = () => {
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           </div>
-
-          <button type="button" onClick={() => setShowAddFilter(true)} className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-            <Plus className="h-4 w-4" />
-            Add Filter
-          </button>
 
           <button type="button" className="ml-auto inline-flex items-center rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
             My Filters
@@ -1586,14 +1424,6 @@ const Reporting = () => {
         </div>
       )}
 
-      <Modal isOpen={showAddFilter} onClose={() => setShowAddFilter(false)} title="Add Filter" size="md">
-        <div className="space-y-4">
-          <div className="text-sm text-gray-700">This is a placeholder for the MaintainX-style “Add Filter” builder.</div>
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowAddFilter(false)}>Close</Button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 };
